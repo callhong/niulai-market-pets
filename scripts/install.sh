@@ -29,7 +29,7 @@ else
 fi
 [[ -x "$app_source/Contents/MacOS/NiuLaiMarketPets" ]] || { print -u2 "app build missing"; exit 1; }
 
-mkdir -p "$pets_root" "$state_root/logs" "$state_root/config-backups" "$backup_root/pets" "$user_home/Applications" "$user_home/Library/LaunchAgents"
+mkdir -p "$pets_root" "$state_root/logs" "$state_root/config-backups" "$backup_root/pets" "$backup_root/legacy-launchagents" "$user_home/Applications" "$user_home/Library/LaunchAgents"
 config_backup="$backup_root/config.toml.before-install"
 cp -p "$config_path" "$config_backup"
 
@@ -39,6 +39,16 @@ had_plist=false
 [[ -e "$plist_destination" ]] && had_plist=true
 if $had_app; then ditto "$app_destination" "$backup_root/app-before-install"; fi
 if $had_plist; then cp -p "$plist_destination" "$backup_root/launchagent-before-install.plist"; fi
+
+# Migrate any pre-public or older launch agent for this product family so a
+# direct DMG install cannot leave two controllers running the same app path.
+for legacy_plist in "$user_home/Library/LaunchAgents/"*niulai-market-pets*.plist(N); do
+  legacy_label="${legacy_plist:t:r}"
+  [[ "$legacy_label" == "$label" ]] && continue
+  launchctl bootout "gui/$uid/$legacy_label" 2>/dev/null || true
+  cp -p "$legacy_plist" "$backup_root/legacy-launchagents/$legacy_label.plist"
+  rm -f "$legacy_plist"
+done
 
 typeset -A had_pet
 for pet in niulai baola muamua; do

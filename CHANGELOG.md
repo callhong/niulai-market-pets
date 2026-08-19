@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.2
+
+- 安装公开 DMG 时自动停用并备份旧版同产品 LaunchAgent，避免重复运行。
+- 卸载公开版时尝试恢复被迁移的旧 LaunchAgent。
+
 ## 1.0.1
 
 - 兼容 GitHub macOS 14 runner 的 Swift 5.10 工具链。

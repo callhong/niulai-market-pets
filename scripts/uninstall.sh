@@ -54,6 +54,15 @@ if [[ -f "$config_backup" ]]; then
   cp -p "$config_backup" "$config_path"
 fi
 
+for legacy_backup in "$backup_root/legacy-launchagents/"*.plist(N); do
+  legacy_destination="$user_home/Library/LaunchAgents/${legacy_backup:t}"
+  if [[ ! -e "$legacy_destination" ]]; then
+    cp -p "$legacy_backup" "$legacy_destination"
+    plutil -lint "$legacy_destination" >/dev/null
+    launchctl bootstrap "gui/$uid" "$legacy_destination" 2>/dev/null || true
+  fi
+done
+
 if $remove_pets; then
   for pet in niulai baola muamua; do
     pet_path="$pets_root/$pet"

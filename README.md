@@ -35,6 +35,8 @@
 
 如果只想手动拖拽应用，也可以将 `NiuLaiMarketPets.app` 放入 `~/Applications`，但仍需先运行 DMG 中的安装命令来安装 `~/.codex/pets` 宠物包。
 
+从旧版迁移时，安装命令会先停用并备份同产品的旧 LaunchAgent，避免两个控制器同时运行；卸载公开版时会尝试恢复旧版本。
+
 首次运行如果 macOS 提示应用来自未验证开发者，请在“系统设置 → 隐私与安全性”中允许打开。公开 Release 默认使用本地临时签名，未配置 Apple Developer 签名与公证。
 
 宠物切换需要 Codex 的用户配置文件存在；应用只改写 `[desktop]` 下的 `selected-avatar-id`，写入前会在 `~/.codex/market-pet/config-backups` 保留最多五份备份。
