@@ -1,0 +1,397 @@
+import AppKit
+import Combine
+import NiuLaiMarketPets
+import SwiftUI
+import UserNotifications
+
+@main
+struct NiuLaiMarketPetsApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+
+    var body: some Scene {
+        Settings { EmptyView() }
+    }
+}
+
+@MainActor
+final class ContextHostingView: NSHostingView<AnyView> {
+    var contextMenuBuilder: (() -> NSMenu)?
+
+    override func rightMouseDown(with event: NSEvent) {
+        guard let menu = contextMenuBuilder?() else {
+            super.rightMouseDown(with: event)
+            return
+        }
+        NSMenu.popUpContextMenu(menu, with: event, for: self)
+    }
+}
+
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDelegate {
+    let model = ControllerModel()
+    private var panel: FloatingPanel?
+    private var contextHostingView: ContextHostingView?
+    private var statusItem: NSStatusItem?
+    private var statusSummaryItem: NSMenuItem?
+    private var statusShapeItems: [NSMenuItem] = []
+    private var statusTargetItems: [NSMenuItem] = []
+    private var statusPollingItem: NSMenuItem?
+    private var statusScaleItem: NSMenuItem?
+    private var statusSpeechScaleItem: NSMenuItem?
+    private var statusMuteItem: NSMenuItem?
+    private var scalePopover: NSPopover?
+    private var speechScalePopover: NSPopover?
+    private var cancellables = Set<AnyCancellable>()
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApplication.shared.setActivationPolicy(.accessory)
+        model.start()
+        observeLayoutChanges()
+        requestNotifications()
+        setupStatusItem()
+        if model.panelVisible { showPanel() }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        model.stop()
+    }
+
+    func showPanel() {
+        if panel == nil {
+            let size = FloatingLayout.size(for: model.petScalePercent)
+            let frame = NSRect(origin: .zero, size: size)
+            let created = FloatingPanel(frame: frame)
+            let host = ContextHostingView(rootView: AnyView(
+                ControllerView(model: model, onToggleVisibility: { [weak self] in
+                    self?.togglePanel()
+                })
+            ))
+            host.contextMenuBuilder = { [weak self] in
+                self?.makeContextMenu() ?? NSMenu()
+            }
+            created.contentView = host
+            created.delegate = self
+            contextHostingView = host
+            panel = created
+        }
+        guard let panel else { return }
+        if let x = model.panelX, let y = model.panelY {
+            panel.setFrameOrigin(NSPoint(x: x, y: y))
+        } else if let screen = NSScreen.main {
+            let visible = screen.visibleFrame
+            panel.setFrameOrigin(NSPoint(
+                x: visible.maxX - panel.frame.width - 24,
+                y: visible.minY + 24
+            ))
+        }
+        resizePanel(keepingCenter: false)
+        panel.orderFrontRegardless()
+        model.setPanelVisible(true)
+    }
+
+    func hidePanel() {
+        guard let panel else {
+            model.setPanelVisible(false)
+            return
+        }
+        let origin = panel.frame.origin
+        model.updatePanelPosition(x: origin.x, y: origin.y)
+        model.setPanelVisible(false)
+        panel.orderOut(nil)
+    }
+
+    @objc private func togglePanel() {
+        if panel?.isVisible == true { hidePanel() } else { showPanel() }
+    }
+
+    @objc private func selectShapeFromMenu(_ sender: NSMenuItem) {
+        guard let value = sender.representedObject as? String else { return }
+        if value == ControlMode.auto.rawValue {
+            model.selectAuto()
+        } else if let pet = PetID(rawValue: value) {
+            model.selectManual(pet)
+        }
+    }
+
+    @objc private func selectTargetFromMenu(_ sender: NSMenuItem) {
+        guard let targetID = sender.representedObject as? String else { return }
+        model.selectTarget(MarketTarget.target(id: targetID))
+    }
+
+    @objc private func toggleIndexPollingFromMenu(_ sender: NSMenuItem) {
+        model.toggleIndexPolling()
+    }
+
+    @objc private func toggleMuteFromMenu(_ sender: NSMenuItem) {
+        model.toggleMuted()
+        statusMuteItem?.state = model.isMuted ? .on : .off
+    }
+
+    @objc private func showScaleEditorFromMenu() {
+        if let scalePopover, scalePopover.isShown {
+            scalePopover.close()
+            return
+        }
+        let editor = ScaleEditorView(model: model) { [weak self] in
+            self?.scalePopover?.close()
+        }
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.animates = true
+        popover.contentSize = NSSize(width: 250, height: 160)
+        popover.contentViewController = NSHostingController(rootView: editor)
+        scalePopover = popover
+        show(popover: popover)
+    }
+
+    @objc private func showSpeechScaleEditorFromMenu() {
+        if let speechScalePopover, speechScalePopover.isShown {
+            speechScalePopover.close()
+            return
+        }
+        let editor = SpeechScaleEditorView(model: model) { [weak self] in
+            self?.speechScalePopover?.close()
+        }
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.animates = true
+        popover.contentSize = NSSize(width: 250, height: 160)
+        popover.contentViewController = NSHostingController(rootView: editor)
+        speechScalePopover = popover
+        show(popover: popover)
+    }
+
+    @objc private func quit() {
+        NSApplication.shared.terminate(nil)
+    }
+
+    func windowDidMove(_ notification: Notification) {
+        guard let panel else { return }
+        let origin = panel.frame.origin
+        model.updatePanelPosition(x: origin.x, y: origin.y)
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        hidePanel()
+        return false
+    }
+
+    func menuWillOpen(_ menu: NSMenu) {
+        updateStatusMenu(menu)
+    }
+
+    private func observeLayoutChanges() {
+        model.$petScalePercent
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.resizePanel(keepingCenter: true)
+            }
+            .store(in: &cancellables)
+    }
+
+    private func show(popover: NSPopover) {
+        guard let host = contextHostingView else { return }
+        let anchor = NSRect(x: host.bounds.midX - 1, y: host.bounds.midY - 1, width: 2, height: 2)
+        popover.show(relativeTo: anchor, of: host, preferredEdge: .minY)
+    }
+
+    private func resizePanel(keepingCenter: Bool) {
+        guard let panel else { return }
+        let desired = FloatingLayout.size(for: model.petScalePercent)
+        if panel.frame.size != desired {
+            var frame = panel.frame
+            if keepingCenter {
+                let center = NSPoint(x: frame.midX, y: frame.midY)
+                frame.size = desired
+                frame.origin = NSPoint(x: center.x - desired.width / 2, y: center.y - desired.height / 2)
+            } else {
+                frame.size = desired
+            }
+            panel.setFrame(frame, display: true)
+        }
+        // Also clamp an unchanged-size panel on launch. A persisted origin
+        // can be outside the current screen after a monitor/layout change.
+        clampPanelToVisibleScreen()
+    }
+
+    private func clampPanelToVisibleScreen() {
+        guard let panel, let screen = panel.screen ?? NSScreen.main else { return }
+        let visible = screen.visibleFrame
+        var origin = panel.frame.origin
+        origin.x = min(max(origin.x, visible.minX), max(visible.minX, visible.maxX - panel.frame.width))
+        origin.y = min(max(origin.y, visible.minY), max(visible.minY, visible.maxY - panel.frame.height))
+        if origin != panel.frame.origin {
+            panel.setFrameOrigin(origin)
+        }
+    }
+
+    private func makeContextMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+
+        let shapeItem = NSMenuItem(title: "形态", action: nil, keyEquivalent: "")
+        shapeItem.submenu = makeShapeSubmenu()
+        menu.addItem(shapeItem)
+
+        let targetItem = NSMenuItem(title: "指数", action: nil, keyEquivalent: "")
+        targetItem.submenu = makeTargetSubmenu()
+        menu.addItem(targetItem)
+
+        menu.addItem(.separator())
+        let scale = NSMenuItem(
+            title: "调节宠物大小（\(Int(model.petScalePercent.rounded()))%）…",
+            action: #selector(showScaleEditorFromMenu),
+            keyEquivalent: ""
+        )
+        scale.target = self
+        menu.addItem(scale)
+        let speechScale = NSMenuItem(
+            title: "调节台词字号（\(Int(model.speechTextScalePercent.rounded()))%）…",
+            action: #selector(showSpeechScaleEditorFromMenu),
+            keyEquivalent: ""
+        )
+        speechScale.target = self
+        menu.addItem(speechScale)
+        let mute = NSMenuItem(title: "静音", action: #selector(toggleMuteFromMenu(_:)), keyEquivalent: "")
+        mute.target = self
+        mute.state = model.isMuted ? .on : .off
+        menu.addItem(mute)
+        menu.addItem(.separator())
+
+        let visibility = NSMenuItem(
+            title: model.panelVisible ? "隐藏宠物" : "显示宠物",
+            action: #selector(togglePanel),
+            keyEquivalent: ""
+        )
+        visibility.target = self
+        menu.addItem(visibility)
+        return menu
+    }
+
+    private func makeShapeSubmenu() -> NSMenu {
+        let submenu = NSMenu()
+        submenu.autoenablesItems = false
+        let values: [(String, String)] = [("自动", ControlMode.auto.rawValue)] + PetID.allCases.map { ($0.displayName, $0.rawValue) }
+        for (title, value) in values {
+            let item = NSMenuItem(title: title, action: #selector(selectShapeFromMenu(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = value
+            item.state = value == ControlMode.auto.rawValue
+                ? (model.mode == .auto ? .on : .off)
+                : (model.mode == .manual && model.activePet.rawValue == value ? .on : .off)
+            submenu.addItem(item)
+        }
+        return submenu
+    }
+
+    private func makeTargetSubmenu() -> NSMenu {
+        let submenu = NSMenu()
+        submenu.autoenablesItems = false
+        let groups: [[MarketTarget]] = [
+            [.sse],
+            [.csiAll, .thsAll],
+            [.chinext, .star50],
+            [.cni2000],
+        ]
+        for (groupIndex, group) in groups.enumerated() {
+            if groupIndex > 0 { submenu.addItem(.separator()) }
+            for target in group {
+                let item = NSMenuItem(title: target.name, action: #selector(selectTargetFromMenu(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = target.id
+                item.state = !model.isIndexPollingEnabled && model.target.id == target.id ? .on : .off
+                submenu.addItem(item)
+            }
+        }
+        submenu.addItem(.separator())
+        let polling = NSMenuItem(
+            title: "轮询指数（每 60 秒）",
+            action: #selector(toggleIndexPollingFromMenu(_:)),
+            keyEquivalent: ""
+        )
+        polling.target = self
+        polling.toolTip = "开启后每 60 秒自动切换到下一个指数目标"
+        polling.state = model.isIndexPollingEnabled ? .on : .off
+        submenu.addItem(polling)
+        return submenu
+    }
+
+    private func setupStatusItem() {
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        item.button?.image = NSImage(systemSymbolName: "pawprint.fill", accessibilityDescription: "牛来行情宠物")
+        item.button?.toolTip = "牛来行情宠物"
+
+        let menu = NSMenu()
+        menu.delegate = self
+
+        let summary = NSMenuItem(title: "指数 --", action: nil, keyEquivalent: "")
+        summary.isEnabled = false
+        menu.addItem(summary)
+        statusSummaryItem = summary
+
+        let shapeItem = NSMenuItem(title: "形态", action: nil, keyEquivalent: "")
+        shapeItem.submenu = makeShapeSubmenu()
+        statusShapeItems = shapeItem.submenu?.items ?? []
+        menu.addItem(shapeItem)
+
+        let targetItem = NSMenuItem(title: "指数", action: nil, keyEquivalent: "")
+        targetItem.submenu = makeTargetSubmenu()
+        statusTargetItems = targetItem.submenu?.items.filter { $0.representedObject is String } ?? []
+        statusPollingItem = targetItem.submenu?.items.first(where: { $0.action == #selector(toggleIndexPollingFromMenu(_:)) })
+        menu.addItem(targetItem)
+
+        let scaleItem = NSMenuItem(title: "调节宠物大小…", action: #selector(showScaleEditorFromMenu), keyEquivalent: "")
+        scaleItem.target = self
+        menu.addItem(scaleItem)
+        statusScaleItem = scaleItem
+
+        let speechScaleItem = NSMenuItem(title: "调节台词字号…", action: #selector(showSpeechScaleEditorFromMenu), keyEquivalent: "")
+        speechScaleItem.target = self
+        menu.addItem(speechScaleItem)
+        statusSpeechScaleItem = speechScaleItem
+
+        let muteItem = NSMenuItem(title: "静音", action: #selector(toggleMuteFromMenu(_:)), keyEquivalent: "")
+        muteItem.target = self
+        menu.addItem(muteItem)
+        statusMuteItem = muteItem
+
+        menu.addItem(.separator())
+        let visibility = NSMenuItem(title: "显示／隐藏宠物", action: #selector(togglePanel), keyEquivalent: "")
+        visibility.target = self
+        menu.addItem(visibility)
+        menu.addItem(.separator())
+        let exit = NSMenuItem(title: "退出", action: #selector(quit), keyEquivalent: "q")
+        exit.target = self
+        menu.addItem(exit)
+
+        item.menu = menu
+        statusMenu = menu
+        statusItem = item
+        updateStatusMenu(menu)
+    }
+
+    private var statusMenu: NSMenu?
+
+    private func updateStatusMenu(_ menu: NSMenu) {
+        statusSummaryItem?.title = "\(model.target.name) \(MarketRules.signedPercent(model.quote?.percent)) · \(model.session.rawValue)"
+        for item in statusShapeItems {
+            guard let value = item.representedObject as? String else { continue }
+            item.state = value == ControlMode.auto.rawValue
+                ? (model.mode == .auto ? .on : .off)
+                : (model.mode == .manual && model.activePet.rawValue == value ? .on : .off)
+        }
+        for item in statusTargetItems {
+            guard let targetID = item.representedObject as? String else { continue }
+            item.state = !model.isIndexPollingEnabled && model.target.id == targetID ? .on : .off
+        }
+        statusPollingItem?.state = model.isIndexPollingEnabled ? .on : .off
+        statusScaleItem?.title = "调节宠物大小（\(Int(model.petScalePercent.rounded()))%）…"
+        statusSpeechScaleItem?.title = "调节台词字号（\(Int(model.speechTextScalePercent.rounded()))%）…"
+        statusMuteItem?.state = model.isMuted ? .on : .off
+        _ = menu
+    }
+
+    private func requestNotifications() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert]) { _, _ in }
+    }
+}
