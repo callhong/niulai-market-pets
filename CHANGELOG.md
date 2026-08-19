@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.1
+
+- 兼容 GitHub macOS 14 runner 的 Swift 5.10 工具链。
+- 修复 Swift 6 编译器下音频播放器默认初始化的 actor 隔离问题。
+
 ## 1.0.0
 
 - 首次公开 macOS 版本。
