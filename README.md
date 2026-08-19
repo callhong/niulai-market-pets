@@ -41,7 +41,7 @@
 
 ## 从源码构建
 
-需要 macOS 13+、Swift 6 工具链和 `jq`。
+需要 macOS 13+、Swift 5.10+ 工具链和 `jq`；Swift 6 工具链同样支持。
 
 ```bash
 swift run NiuLaiMarketPetsTests

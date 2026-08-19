@@ -35,13 +35,13 @@ public final class ControllerModel: ObservableObject {
         quoteService: QuoteService = QuoteService(target: .default),
         petSwitcher: PetSwitcher = PetSwitcher(),
         stateStore: StateStore = StateStore(),
-        clickAudioPlayer: ClickAudioPlayer = ClickAudioPlayer()
+        clickAudioPlayer: ClickAudioPlayer? = nil
     ) {
         self.quoteService = quoteService
         self.petSwitcher = petSwitcher
         self.stateStore = stateStore
         self.engine = MarketStateEngine()
-        self.clickAudioPlayer = clickAudioPlayer
+        self.clickAudioPlayer = clickAudioPlayer ?? ClickAudioPlayer()
     }
 
     deinit {
