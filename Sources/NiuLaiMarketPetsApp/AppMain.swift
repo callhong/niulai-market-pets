@@ -318,8 +318,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     private func setupStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.image = NSImage(systemSymbolName: "pawprint.fill", accessibilityDescription: "牛来行情宠物")
-        item.button?.toolTip = "牛来行情宠物"
+        guard let button = item.button else { return }
+        let icon = NSImage(systemSymbolName: "pawprint.fill", accessibilityDescription: "牛来行情宠物")
+        icon?.isTemplate = true
+        button.image = icon
+        // Keep a short text fallback: on crowded menu bars the image can be
+        // visually lost or moved into the hidden status-item area.
+        button.title = "牛来"
+        button.imagePosition = .imageLeading
+        button.imageScaling = .scaleProportionallyDown
+        button.font = NSFont.systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
+        button.toolTip = "牛来行情宠物"
+        button.setAccessibilityLabel("牛来行情宠物")
+        item.length = 48
+        item.isVisible = true
 
         let menu = NSMenu()
         menu.delegate = self

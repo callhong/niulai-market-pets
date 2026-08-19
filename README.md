@@ -47,7 +47,7 @@
 
 从 [Releases](https://github.com/callhong/niulai-market-pets/releases) 下载最新 DMG，打开后双击 Install NiuLai Market Pets.command。安装器会将独立应用放入当前用户的 Applications 目录，并安装用户级 LaunchAgent。
 
-也可以直接下载当前版本：[NiuLaiMarketPets-1.0.3.dmg](https://github.com/callhong/niulai-market-pets/releases/download/v1.0.3/NiuLaiMarketPets-1.0.3.dmg)。
+也可以直接下载当前版本：[NiuLaiMarketPets-1.0.4.dmg](https://github.com/callhong/niulai-market-pets/releases/download/v1.0.4/NiuLaiMarketPets-1.0.4.dmg)。
 
 安装器会：
 

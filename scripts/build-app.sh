@@ -18,6 +18,7 @@ app="$staging/NiuLaiMarketPets.app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$binary" "$app/Contents/MacOS/NiuLaiMarketPets"
 cp "$project_root/Resources/Info.plist" "$app/Contents/Info.plist"
+cp "$project_root/Resources/AppIcon.icns" "$app/Contents/Resources/AppIcon.icns"
 cp "$project_root/Resources/Audio/"*.wav "$app/Contents/Resources/"
 for pet in niulai baola muamua; do
   mkdir -p "$app/Contents/Resources/Pets/$pet"
