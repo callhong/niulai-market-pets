@@ -4,8 +4,8 @@ set -euo pipefail
 project_root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$project_root"
 
-forbidden='(/Users/|/home/|id_ed25519|tail5d7cb0|com\.hong|ssh-rsa|BEGIN (RSA|OPENSSH|EC|PRIVATE))'
-if rg -n --hidden -g '!.git/**' -g '!scripts/validate-public.sh' -g '!*.png' -g '!*.jpg' -g '!*.gif' -g '!*.webp' -g '!*.wav' -g '!dist/**' -g '!build/**' -g '!.build/**' "$forbidden" .; then
+forbidden='(/Users/|/home/|id_ed25519|tail5d7cb0|com\.hong|ssh-rsa|BEGIN (RSA|OPENSSH|EC|PRIVATE)|\.codex|codex://|selected-avatar-id|ChatGPT|OpenAI|Codex)'
+if rg -ni --hidden -g '!.git/**' -g '!scripts/validate-public.sh' -g '!*.png' -g '!*.jpg' -g '!*.gif' -g '!*.webp' -g '!*.wav' -g '!dist/**' -g '!build/**' -g '!.build/**' "$forbidden" .; then
   print -u2 "private information pattern found"
   exit 1
 fi

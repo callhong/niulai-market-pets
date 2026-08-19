@@ -8,5 +8,5 @@ included in this public repository with permission for this project. If a
 future contribution includes third-party audio, film stills, or character
 art, the contributor must document the permission or remove the material.
 
-This project is an independent fan-made desktop integration. It is not
-affiliated with OpenAI, Codex, or any film or audio rights holder.
+This project is an independent fan-made desktop companion. It is not
+affiliated with any film or audio rights holder.

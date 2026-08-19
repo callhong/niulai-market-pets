@@ -19,8 +19,7 @@ trap 'rm -rf "$staging"' EXIT
 
 ditto "$app" "$staging/NiuLaiMarketPets.app"
 cp "$project_root/README.md" "$staging/README.md"
-mkdir -p "$staging/assets/pets" "$staging/Resources" "$staging/scripts"
-ditto "$project_root/assets/pets" "$staging/assets/pets"
+mkdir -p "$staging/Resources" "$staging/scripts"
 cp "$project_root/Resources/com.callhong.niulai-market-pets.plist.in" "$staging/Resources/"
 cp "$project_root/scripts/install.sh" "$project_root/scripts/uninstall.sh" "$staging/scripts/"
 cp "$project_root/scripts/install-from-dmg.command" "$staging/Install NiuLai Market Pets.command"

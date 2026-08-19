@@ -1,7 +1,7 @@
 {
   "id": "muamua",
   "displayName": "牛妈",
-  "description": "电影《牛来》中的牛来妈妈，一只会在上证指数下跌时出现的 Codex 宠物。",
+  "description": "牛妈：上证指数下跌时出现的桌面行情宠物。",
   "spriteVersionNumber": 2,
   "spritesheetPath": "spritesheet.webp"
 }

@@ -90,8 +90,11 @@ struct SpriteThumbnailView: View {
     }
 
     private var thumbnailImage: NSImage? {
-        let url = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".codex/pets/\(pet.rawValue)/spritesheet.webp")
+        guard let url = Bundle.main.url(
+            forResource: "spritesheet",
+            withExtension: "webp",
+            subdirectory: "Pets/\(pet.rawValue)"
+        ) else { return nil }
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil), let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return nil }
         let cell = image.cropping(to: CGRect(x: 0, y: 0, width: 192, height: 208)) ?? image
         return NSImage(cgImage: cell, size: NSSize(width: 48, height: 52))

@@ -3,35 +3,28 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "$0")" && pwd)"
 project_root="$(cd "$script_dir/.." && pwd)"
-asset_root="$project_root/assets/pets"
-user_home="${HOME:?HOME is required}"
-codex_root="$user_home/.codex"
-pets_root="$codex_root/pets"
-state_root="$codex_root/market-pet"
+user_home="$HOME"
+[[ -n "$user_home" ]] || { print -u2 "HOME is required"; exit 1; }
+tmp_root="${TMPDIR:-/tmp}"
+state_root="$user_home/Library/Application Support/NiuLaiMarketPets"
 backup_root="$state_root/install-backups/$(date +%Y%m%d-%H%M%S)"
 app_destination="$user_home/Applications/NiuLaiMarketPets.app"
 plist_destination="$user_home/Library/LaunchAgents/com.callhong.niulai-market-pets.plist"
 label="com.callhong.niulai-market-pets"
 uid="$(id -u)"
-config_path="$codex_root/config.toml"
 
-[[ -f "$config_path" ]] || { print -u2 "Codex config not found: $config_path"; exit 1; }
-for pet in niulai baola muamua; do
-  [[ -f "$asset_root/$pet/pet.json" ]] || { print -u2 "pet manifest missing: $pet"; exit 1; }
-  [[ -f "$asset_root/$pet/spritesheet.webp" ]] || { print -u2 "pet spritesheet missing: $pet"; exit 1; }
-done
-
-if [[ "${NIULAI_SKIP_BUILD:-0}" == "1" ]]; then
+skip_build="${NIULAI_SKIP_BUILD-0}"
+if [[ "$skip_build" == "1" ]]; then
   app_source="${NIULAI_APP_SOURCE:?NIULAI_APP_SOURCE is required when skipping the build}"
 else
   "$script_dir/build-app.sh" >/dev/null
   app_source="$project_root/build/NiuLaiMarketPets.build"
 fi
-[[ -x "$app_source/Contents/MacOS/NiuLaiMarketPets" ]] || { print -u2 "app build missing"; exit 1; }
+[[ -x "$app_source/Contents/MacOS/NiuLaiMarketPets" ]] || { print -u2 "app build missing: $app_source"; exit 1; }
+[[ -d "$app_source/Contents/Resources/Pets" ]] || { print -u2 "bundled pet resources missing"; exit 1; }
 
-mkdir -p "$pets_root" "$state_root/logs" "$state_root/config-backups" "$backup_root/pets" "$backup_root/legacy-launchagents" "$user_home/Applications" "$user_home/Library/LaunchAgents"
-config_backup="$backup_root/config.toml.before-install"
-cp -p "$config_path" "$config_backup"
+mkdir -p "$state_root/logs" "$backup_root/legacy-launchagents" \
+  "$user_home/Applications" "$user_home/Library/LaunchAgents"
 
 had_app=false
 had_plist=false
@@ -40,8 +33,8 @@ had_plist=false
 if $had_app; then ditto "$app_destination" "$backup_root/app-before-install"; fi
 if $had_plist; then cp -p "$plist_destination" "$backup_root/launchagent-before-install.plist"; fi
 
-# Migrate any pre-public or older launch agent for this product family so a
-# direct DMG install cannot leave two controllers running the same app path.
+# Migrate any older controller for this product family so a direct install
+# cannot leave two floating pets running at the same time.
 for legacy_plist in "$user_home/Library/LaunchAgents/"*niulai-market-pets*.plist(N); do
   legacy_label="${legacy_plist:t:r}"
   [[ "$legacy_label" == "$label" ]] && continue
@@ -50,40 +43,22 @@ for legacy_plist in "$user_home/Library/LaunchAgents/"*niulai-market-pets*.plist
   rm -f "$legacy_plist"
 done
 
-typeset -A had_pet
-for pet in niulai baola muamua; do
-  had_pet[$pet]=false
-  pet_destination="$pets_root/$pet"
-  if [[ -e "$pet_destination" ]]; then
-    had_pet[$pet]=true
-    ditto "$pet_destination" "$backup_root/pets/$pet"
-  fi
-done
-
-staging="$(mktemp -d "${TMPDIR:-/tmp}/niulai-install.XXXXXX")"
+staging="$(mktemp -d "$tmp_root/niulai-install.XXXXXX")"
 trap 'rm -rf "$staging"' EXIT
-for pet in niulai baola muamua; do
-  mkdir -p "$staging/pets/$pet"
-  cp "$asset_root/$pet/pet.json" "$staging/pets/$pet/pet.json"
-  cp "$asset_root/$pet/spritesheet.webp" "$staging/pets/$pet/spritesheet.webp"
-done
 ditto "$app_source" "$staging/NiuLaiMarketPets.app"
 
-for pet in niulai baola muamua; do
-  pet_destination="$pets_root/$pet"
-  if [[ -e "$pet_destination" ]]; then rm -rf "$pet_destination"; fi
-  mv "$staging/pets/$pet" "$pet_destination"
-done
 if [[ -e "$app_destination" ]]; then rm -rf "$app_destination"; fi
 mv "$staging/NiuLaiMarketPets.app" "$app_destination"
 
 log_path="$state_root/logs/controller.log"
 error_log_path="$state_root/logs/controller.error.log"
+plist_template="$project_root/Resources/com.callhong.niulai-market-pets.plist.in"
+[[ -f "$plist_template" ]] || { print -u2 "LaunchAgent template missing: $plist_template"; exit 1; }
 plist_tmp="$staging/com.callhong.niulai-market-pets.plist"
 sed -e "s|__APP_EXECUTABLE__|$app_destination/Contents/MacOS/NiuLaiMarketPets|g" \
     -e "s|__LOG_PATH__|$log_path|g" \
     -e "s|__ERROR_LOG_PATH__|$error_log_path|g" \
-    "$project_root/Resources/com.callhong.niulai-market-pets.plist.in" > "$plist_tmp"
+    "$plist_template" > "$plist_tmp"
 plutil -lint "$plist_tmp" >/dev/null
 if [[ -e "$plist_destination" ]]; then rm -f "$plist_destination"; fi
 mv "$plist_tmp" "$plist_destination"
@@ -92,19 +67,13 @@ jq -n \
   --arg installedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --arg appPath "$app_destination" \
   --arg plistPath "$plist_destination" \
-  --arg configPath "$config_path" \
-  --arg configBackup "$config_backup" \
   --arg backupRoot "$backup_root" \
   --argjson hadApp "$had_app" \
   --argjson hadPlist "$had_plist" \
-  --argjson hadNiulai "${had_pet[niulai]}" \
-  --argjson hadBaola "${had_pet[baola]}" \
-  --argjson hadMuamua "${had_pet[muamua]}" \
-  '{schemaVersion:1, installedAt:$installedAt, appPath:$appPath, plistPath:$plistPath, configPath:$configPath, configBackup:$configBackup, backupRoot:$backupRoot, hadApp:$hadApp, hadPlist:$hadPlist, hadPets:{niulai:$hadNiulai,baola:$hadBaola,muamua:$hadMuamua}}' \
+  '{schemaVersion:2, installedAt:$installedAt, appPath:$appPath, plistPath:$plistPath, backupRoot:$backupRoot, hadApp:$hadApp, hadPlist:$hadPlist}' \
   > "$state_root/install-state.json"
 
 launchctl bootout "gui/$uid/$label" 2>/dev/null || true
-sleep 2
 bootstrap_ok=false
 for attempt in 1 2 3; do
   if launchctl bootstrap "gui/$uid" "$plist_destination"; then

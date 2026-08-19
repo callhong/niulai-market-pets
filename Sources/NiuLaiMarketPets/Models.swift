@@ -13,8 +13,6 @@ public enum PetID: String, CaseIterable, Codable, Sendable {
         }
     }
 
-    public var configValue: String { "custom:\(rawValue)" }
-
     public var shortSemantic: String {
         switch self {
         case .niulai: return "微涨／平盘"

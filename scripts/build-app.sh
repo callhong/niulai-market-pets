@@ -19,6 +19,10 @@ mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$binary" "$app/Contents/MacOS/NiuLaiMarketPets"
 cp "$project_root/Resources/Info.plist" "$app/Contents/Info.plist"
 cp "$project_root/Resources/Audio/"*.wav "$app/Contents/Resources/"
+for pet in niulai baola muamua; do
+  mkdir -p "$app/Contents/Resources/Pets/$pet"
+  cp "$project_root/assets/pets/$pet/pet.json" "$project_root/assets/pets/$pet/spritesheet.webp" "$app/Contents/Resources/Pets/$pet/"
+done
 chmod 755 "$app/Contents/MacOS/NiuLaiMarketPets"
 codesign --force --deep --sign - "$app"
 

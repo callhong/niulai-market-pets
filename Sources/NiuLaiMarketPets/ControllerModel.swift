@@ -22,7 +22,6 @@ public final class ControllerModel: ObservableObject {
 
     public let stateStore: StateStore
     private var quoteService: QuoteService
-    private let petSwitcher: PetSwitcher
     private var engine: MarketStateEngine
     private var pollingTask: Task<Void, Never>?
     private var indexPollingTask: Task<Void, Never>?
@@ -33,12 +32,10 @@ public final class ControllerModel: ObservableObject {
 
     public init(
         quoteService: QuoteService = QuoteService(target: .default),
-        petSwitcher: PetSwitcher = PetSwitcher(),
         stateStore: StateStore = StateStore(),
         clickAudioPlayer: ClickAudioPlayer? = nil
     ) {
         self.quoteService = quoteService
-        self.petSwitcher = petSwitcher
         self.stateStore = stateStore
         self.engine = MarketStateEngine()
         self.clickAudioPlayer = clickAudioPlayer ?? ClickAudioPlayer()
@@ -69,7 +66,6 @@ public final class ControllerModel: ObservableObject {
         isMuted = state.isMuted
         engine = MarketStateEngine(activePet: activePet, hasHistory: state.lastMarketPercent != nil)
         if mode == .manual, let manual = state.manualPetID { activePet = manual; engine.resetForManual(pet: manual) }
-        synchronizeCodexPet()
         pollingTask = Task { @MainActor [weak self] in
             guard let self else { return }
             while !Task.isCancelled {
@@ -90,21 +86,11 @@ public final class ControllerModel: ObservableObject {
     }
 
     public func selectManual(_ pet: PetID) {
-        let previous = activePet
-        let previousMode = mode
         mode = .manual
         engine.resetForManual(pet: pet)
-        do {
-            _ = try petSwitcher.switchTo(pet, current: previous)
-            activePet = pet
-            lastError = nil
-            playClickAudio(for: pet)
-        } catch {
-            mode = previousMode
-            activePet = previous
-            engine = MarketStateEngine(activePet: previous, hasHistory: quote?.percent.isFinite == true)
-            lastError = error.localizedDescription
-        }
+        activePet = pet
+        lastError = nil
+        playClickAudio(for: pet)
         saveState()
     }
 
@@ -137,7 +123,7 @@ public final class ControllerModel: ObservableObject {
         // quote immediately, including outside trading hours. Passive polling
         // still obeys the trading-session gate in refresh().
         if let quote, !quote.isStale, let next = MarketRules.bucket(for: quote.percent), next != activePet {
-            applySwitch(next, reason: "恢复自动")
+            applySwitch(next)
         }
         saveState()
     }
@@ -196,14 +182,6 @@ public final class ControllerModel: ObservableObject {
         clickAudioPlayer.play(for: pet ?? activePet)
     }
 
-    private func synchronizeCodexPet() {
-        do {
-            _ = try petSwitcher.switchTo(activePet, current: nil)
-        } catch {
-            lastError = "Codex 宠物同步失败：\(error.localizedDescription)"
-        }
-    }
-
     public func refresh() async {
         let targetID = target.id
         let result = await quoteService.fetch()
@@ -219,7 +197,7 @@ public final class ControllerModel: ObservableObject {
             session = stale ? .stale : sessionNow
             if mode == .auto, sessionNow.allowsAutomaticSwitch, !stale,
                let next = engine.accept(percent: quote.percent, at: now, tradingAllowed: true, isStale: false) {
-                applySwitch(next, reason: "行情自动")
+                applySwitch(next)
             }
         } else {
             isOnline = false
@@ -239,15 +217,11 @@ public final class ControllerModel: ObservableObject {
         return next
     }
 
-    private func applySwitch(_ pet: PetID, reason: String) {
-        let previous = activePet
-        do {
-            _ = try petSwitcher.switchTo(pet, current: previous)
-            activePet = pet
-            lastError = nil
-            playClickAudio(for: pet)
-            sendNotification(for: pet)
-        } catch { lastError = "\(reason)：\(error.localizedDescription)" }
+    private func applySwitch(_ pet: PetID) {
+        activePet = pet
+        lastError = nil
+        playClickAudio(for: pet)
+        sendNotification(for: pet)
     }
 
     private func saveState() {

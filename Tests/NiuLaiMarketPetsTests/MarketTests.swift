@@ -90,20 +90,6 @@ struct MarketTestRunner {
             expect(engine.accept(percent: .nan, at: Date(), tradingAllowed: true, isStale: false) == nil)
             expect(engine.accept(percent: 1.01, at: Date(), tradingAllowed: false, isStale: false) == nil)
         }
-        run("TOML preserves sections and comments") {
-            let editor = ConfigEditor(configURL: URL(fileURLWithPath: "/tmp/does-not-exist"))
-            let original = "# keep\n[other]\nvalue = 1\n\n[desktop]\n# note\nselected-avatar-id = \"seedy\"\n\n[tail]\nkeep = true\n"
-            let changed = editor.replacingSelectedAvatar(in: original, with: "custom:niulai")
-            expect(changed.contains("selected-avatar-id = \"custom:niulai\""))
-            expect(changed.contains("[other]\nvalue = 1"))
-            expect(changed.contains("[tail]\nkeep = true"))
-            expect(editor.selectedAvatar(in: changed) == "custom:niulai")
-        }
-        run("TOML adds missing desktop") {
-            let editor = ConfigEditor(configURL: URL(fileURLWithPath: "/tmp/does-not-exist"))
-            let added = editor.replacingSelectedAvatar(in: "[other]\nvalue = 1\n", with: "custom:baola")
-            expect(added.contains("[desktop]\nselected-avatar-id = \"custom:baola\""))
-        }
         run("corrupt state recovery") {
             let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
             try! FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -198,13 +184,7 @@ struct MarketTestRunner {
             expect(engine.accept(percent: -2, at: Date(), tradingAllowed: true, isStale: false) == nil)
             expect(engine.activePet == .baola)
         }
-        run("missing Codex setup degrades quietly") {
-            let setupConfig = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/codex-app/config.json")
-            if !FileManager.default.fileExists(atPath: setupConfig.path) {
-                expect(DeepLinkReloader().reload())
-            }
-        }
-        print("swift-test-harness: PASS (15 groups)")
+        print("swift-test-harness: PASS")
     }
 
     static func run(_ name: String, _ body: () -> Void) {

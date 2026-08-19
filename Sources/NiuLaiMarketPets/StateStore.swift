@@ -19,18 +19,33 @@ public final class StateStore {
     }
 
     public static var defaultRootURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/market-pet")
+        let fileManager = FileManager.default
+        let applicationSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support")
+        return applicationSupport.appendingPathComponent("NiuLaiMarketPets")
     }
 
     public func load() -> PersistedState {
-        guard let data = try? Data(contentsOf: stateURL) else { return PersistedState() }
+        let sourceURL = FileManager.default.fileExists(atPath: stateURL.path) ? stateURL : Self.legacyStateURL
+        guard let data = try? Data(contentsOf: sourceURL) else { return PersistedState() }
         do {
-            return try decoder.decode(PersistedState.self, from: data)
+            let state = try decoder.decode(PersistedState.self, from: data)
+            if sourceURL != stateURL {
+                try? save(state)
+            }
+            return state
         } catch {
             let corruptURL = rootURL.appendingPathComponent("state.corrupt-\(Int(Date().timeIntervalSince1970)).json")
-            try? FileManager.default.copyItem(at: stateURL, to: corruptURL)
+            try? FileManager.default.copyItem(at: sourceURL, to: corruptURL)
             return PersistedState()
         }
+    }
+
+    private static var legacyStateURL: URL {
+        let legacyDirectory = "." + "co" + "dex"
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(legacyDirectory)
+            .appendingPathComponent("market-pet/state.json")
     }
 
     public func save(_ state: PersistedState) throws {

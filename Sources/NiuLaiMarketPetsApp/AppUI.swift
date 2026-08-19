@@ -15,8 +15,11 @@ private enum SpriteImageCache {
         let key = "\(pet.rawValue)-\(safeRow)-\(safeFrame)-\(Int(size.width))x\(Int(size.height))"
         if let cached = images[key] { return cached }
 
-        let url = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".codex/pets/\(pet.rawValue)/spritesheet.webp")
+        guard let url = Bundle.main.url(
+            forResource: "spritesheet",
+            withExtension: "webp",
+            subdirectory: "Pets/\(pet.rawValue)"
+        ) else { return nil }
         guard
             let source = CGImageSourceCreateWithURL(url as CFURL, nil),
             let atlas = CGImageSourceCreateImageAtIndex(source, 0, nil),
