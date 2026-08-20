@@ -18,7 +18,7 @@
 
 ## 最新预览
 
-| 牛来：微涨时奔跑 | 豹拉：上涨时直线上跳 | 牛妈：下跌时流泪 |
+| 牛来：微涨时奔跑（红光） | 豹拉：上涨时直线上跳（红光） | 牛妈：下跌时流泪（绿光） |
 | --- | --- | --- |
 | ![牛来](assets/showcase/niulai.jpg) | ![豹拉](assets/showcase/baola.jpg) | ![牛妈](assets/showcase/muamua.jpg) |
 
@@ -31,6 +31,12 @@
 ![牛来奔跑](assets/showcase/niulai-running.gif)
 ![豹拉跳跃](assets/showcase/baola-jumping.gif)
 ![牛妈状态](assets/showcase/muamua-idle.gif)
+
+最新 36 秒实机录屏（上涨 `+1.77%` 自动切换豹拉、红光与行情胶囊）：
+
+<video src="assets/showcase/niulai-market-pets-demo.mp4" controls muted playsinline width="320"></video>
+
+[打开或下载 MP4 录屏](assets/showcase/niulai-market-pets-demo.mp4)
 
 ## 功能
 
