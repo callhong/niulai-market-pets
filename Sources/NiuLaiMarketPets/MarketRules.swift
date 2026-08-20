@@ -10,7 +10,14 @@ public enum MarketRules {
 
     public static func signedPercent(_ percent: Double?) -> String {
         guard let percent, percent.isFinite else { return "--" }
-        return String(format: "%+.2f%%", percent)
+        let rounded = (percent * 100).rounded() / 100
+        let normalized = rounded == 0 ? 0.0 : rounded
+        return String(format: "%+.2f%%", normalized)
+    }
+
+    public static func price(_ price: Double?) -> String {
+        guard let price, price.isFinite else { return "--" }
+        return String(format: "%.2f", price)
     }
 
     public static func session(for date: Date, calendar: Calendar = MarketRules.shanghaiCalendar) -> MarketSession {

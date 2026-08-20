@@ -14,9 +14,9 @@ struct ControllerView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                Text("上证指数").font(.headline)
+                Text(model.target.name).font(.headline)
                 Text(MarketRules.signedPercent(model.quote?.percent)).font(.system(.headline, design: .rounded).weight(.semibold))
-                    .foregroundStyle(model.quote?.percent ?? 0 < 0 ? .blue : .red)
+                    .foregroundStyle(Color(hex: MarketTone.resolve(percent: model.quote?.percent, isStale: model.currentQuoteIsStale).colorHex))
                 Spacer()
                 Circle().fill(model.isOnline ? .green : .gray).frame(width: 8, height: 8)
                 Text(model.session.rawValue).font(.caption).foregroundStyle(.secondary)
@@ -116,5 +116,17 @@ final class FloatingPanel: NSPanel {
         isMovableByWindowBackground = true
         hidesOnDeactivate = false
         animationBehavior = .utilityWindow
+    }
+}
+
+private extension Color {
+    init(hex: String) {
+        let value = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        let number = UInt64(value, radix: 16) ?? 0x8A8F98
+        self.init(
+            red: Double((number >> 16) & 0xff) / 255,
+            green: Double((number >> 8) & 0xff) / 255,
+            blue: Double(number & 0xff) / 255
+        )
     }
 }

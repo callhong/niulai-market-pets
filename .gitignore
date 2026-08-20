@@ -2,6 +2,8 @@
 .build/
 build/
 dist/
+**/bin/
+**/obj/
 *.backup
 *.bak
 *.log

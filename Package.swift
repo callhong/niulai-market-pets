@@ -24,5 +24,10 @@ let package = Package(
             dependencies: ["NiuLaiMarketPets"],
             path: "Tests/NiuLaiMarketPetsTests"
         ),
+        .testTarget(
+            name: "NiuLaiMarketPetsCoreTests",
+            dependencies: ["NiuLaiMarketPets"],
+            path: "Tests/NiuLaiMarketPetsCoreTests"
+        ),
     ]
 )

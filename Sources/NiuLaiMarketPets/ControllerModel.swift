@@ -19,6 +19,8 @@ public final class ControllerModel: ObservableObject {
     @Published public private(set) var speechTextScalePercent: Double = SpeechTextScaleRange.defaultPercent
     @Published public private(set) var isIndexPollingEnabled = false
     @Published public private(set) var isMuted = false
+    @Published public private(set) var showMarketPill = true
+    @Published public private(set) var marketSnapshots: [String: MarketSnapshot] = [:]
 
     public let stateStore: StateStore
     private var quoteService: QuoteService
@@ -27,6 +29,9 @@ public final class ControllerModel: ObservableObject {
     private var indexPollingTask: Task<Void, Never>?
     private var isStarted = false
     private let clickAudioPlayer: ClickAudioPlayer
+    private var notificationPolicy = NotificationPolicy()
+    private var isFirstValidQuote = true
+    private var suppressEffectsForTargetChange = false
 
     public static let indexPollingInterval: TimeInterval = 60
 
@@ -64,6 +69,11 @@ public final class ControllerModel: ObservableObject {
         speechTextScalePercent = state.speechTextScalePercent
         isIndexPollingEnabled = state.indexPollingEnabled
         isMuted = state.isMuted
+        showMarketPill = state.showMarketPill
+        marketSnapshots = [:]
+        notificationPolicy.reset()
+        isFirstValidQuote = true
+        suppressEffectsForTargetChange = false
         engine = MarketStateEngine(activePet: activePet, hasHistory: state.lastMarketPercent != nil)
         if mode == .manual, let manual = state.manualPetID { activePet = manual; engine.resetForManual(pet: manual) }
         pollingTask = Task { @MainActor [weak self] in
@@ -90,6 +100,7 @@ public final class ControllerModel: ObservableObject {
         engine.resetForManual(pet: pet)
         activePet = pet
         lastError = nil
+        notificationPolicy.reset()
         playClickAudio(for: pet)
         saveState()
     }
@@ -109,6 +120,9 @@ public final class ControllerModel: ObservableObject {
         isOnline = false
         session = .offline
         lastError = nil
+        notificationPolicy.reset()
+        isFirstValidQuote = true
+        suppressEffectsForTargetChange = true
         engine = MarketStateEngine(activePet: activePet, hasHistory: false)
         saveState()
         Task { @MainActor [weak self] in
@@ -122,8 +136,9 @@ public final class ControllerModel: ObservableObject {
         // An explicit request to resume automatic mode uses the last fresh
         // quote immediately, including outside trading hours. Passive polling
         // still obeys the trading-session gate in refresh().
-        if let quote, !quote.isStale, let next = MarketRules.bucket(for: quote.percent), next != activePet {
-            applySwitch(next)
+        if let quote, !currentQuoteIsStale, let next = MarketRules.bucket(for: quote.percent), next != activePet {
+            activePet = next
+            playClickAudio(for: next)
         }
         saveState()
     }
@@ -177,6 +192,23 @@ public final class ControllerModel: ObservableObject {
         setMuted(!isMuted)
     }
 
+    public func setShowMarketPill(_ visible: Bool) {
+        showMarketPill = visible
+        saveState()
+    }
+
+    public func toggleMarketPill() {
+        setShowMarketPill(!showMarketPill)
+    }
+
+    public var currentQuoteIsStale: Bool {
+        marketSnapshots[target.id]?.isStale(at: Date()) ?? quote?.isStale ?? true
+    }
+
+    public func snapshot(for target: MarketTarget, at date: Date = Date()) -> MarketSnapshot {
+        marketSnapshots[target.id] ?? MarketSnapshot(targetID: target.id)
+    }
+
     public func playClickAudio(for pet: PetID? = nil) {
         guard !isMuted else { return }
         clickAudioPlayer.play(for: pet ?? activePet)
@@ -186,26 +218,40 @@ public final class ControllerModel: ObservableObject {
         let targetID = target.id
         let result = await quoteService.fetch()
         guard target.id == targetID else { return }
-        lastRefreshAt = Date()
-        if let quote = result.quote {
-            self.quote = quote
-            isOnline = true
-            lastError = result.errors.isEmpty ? nil : result.errors.joined(separator: " | ")
-            let now = Date()
-            let sessionNow = MarketRules.session(for: now)
-            let stale = quote.isStale || now.timeIntervalSince(quote.quoteTimestamp) > 300
-            session = stale ? .stale : sessionNow
-            if mode == .auto, sessionNow.allowsAutomaticSwitch, !stale,
-               let next = engine.accept(percent: quote.percent, at: now, tradingAllowed: true, isStale: false) {
-                applySwitch(next)
-            }
-        } else {
-            isOnline = false
-            session = .offline
-            lastError = result.errors.joined(separator: " | ")
-            engine.clearPendingCandidate()
+        applyFetch(result, for: target, at: Date(), isTargetRotation: suppressEffectsForTargetChange)
+        suppressEffectsForTargetChange = false
+    }
+
+    /// Refreshes missing or older-than-one-minute snapshots concurrently after
+    /// a menu opens. Menu construction remains synchronous and uses the cached
+    /// values while these requests are in flight.
+    public func refreshSnapshotsForMenu(at date: Date = Date()) async {
+        var catalog = MarketTarget.all
+        if !catalog.contains(where: { $0.id == target.id }) {
+            catalog.append(target)
         }
-        saveState()
+        let targets = catalog.filter { target in
+            snapshot(for: target, at: date).isStale(at: date)
+        }
+        guard !targets.isEmpty else { return }
+        await withTaskGroup(of: (MarketTarget, QuoteFetchResult).self) { group in
+            for target in targets {
+                group.addTask {
+                    (target, await QuoteService(target: target).fetch())
+                }
+            }
+            for await (target, result) in group {
+                applyFetch(
+                    result,
+                    for: target,
+                    at: Date(),
+                    isTargetRotation: target.id == self.target.id ? self.suppressEffectsForTargetChange : true
+                )
+                if target.id == self.target.id {
+                    self.suppressEffectsForTargetChange = false
+                }
+            }
+        }
     }
 
     /// Test seam: applies one quote without network access and returns the switched pet, if any.
@@ -217,11 +263,31 @@ public final class ControllerModel: ObservableObject {
         return next
     }
 
-    private func applySwitch(_ pet: PetID) {
+    private func applySwitch(
+        _ pet: PetID,
+        previousPercent: Double?,
+        currentPercent: Double,
+        isInitialSample: Bool,
+        isTargetRotation: Bool,
+        isStale: Bool
+    ) {
+        guard pet != activePet else { return }
         activePet = pet
         lastError = nil
-        playClickAudio(for: pet)
-        sendNotification(for: pet)
+        if !isTargetRotation {
+            playClickAudio(for: pet)
+        }
+        if notificationPolicy.shouldNotify(
+            previousPercent: previousPercent,
+            currentPercent: currentPercent,
+            switchedTo: pet,
+            mode: mode,
+            isInitialSample: isInitialSample,
+            isTargetRotation: isTargetRotation,
+            isStale: isStale
+        ) {
+            sendNotification(for: pet, quote: quote)
+        }
     }
 
     private func saveState() {
@@ -239,7 +305,8 @@ public final class ControllerModel: ObservableObject {
             petScalePercent: petScalePercent,
             speechTextScalePercent: speechTextScalePercent,
             indexPollingEnabled: isIndexPollingEnabled,
-            isMuted: isMuted
+            isMuted: isMuted,
+            showMarketPill: showMarketPill
         )
         try? stateStore.save(state)
     }
@@ -261,11 +328,63 @@ public final class ControllerModel: ObservableObject {
         selectTarget(MarketTarget.nextPollingTarget(after: target.id), disablesPolling: false)
     }
 
-    private func sendNotification(for pet: PetID) {
+    private func sendNotification(for pet: PetID, quote: Quote?) {
         let content = UNMutableNotificationContent()
-        content.title = pet == .muamua ? "妈妈——" : pet == .baola ? "豹拉！" : "牛来了"
-        content.body = "上证指数 \(MarketRules.signedPercent(quote?.percent))"
+        content.title = NotificationPolicy.title(for: pet)
+        content.body = NotificationPolicy.body(for: pet, target: target, quote: quote)
         content.sound = nil
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "niulai-\(pet.rawValue)", content: content, trigger: nil))
+    }
+
+    private func applyFetch(
+        _ result: QuoteFetchResult,
+        for target: MarketTarget,
+        at date: Date,
+        isTargetRotation: Bool
+    ) {
+        let errorText = result.errors.isEmpty ? nil : result.errors.joined(separator: " | ")
+        let validQuote = result.quote.flatMap { quote in
+            quote.symbol == target.symbol && quote.name == target.name ? quote : nil
+        }
+        var snapshot = marketSnapshots[target.id] ?? MarketSnapshot(targetID: target.id)
+        if let validQuote {
+            snapshot.quote = validQuote
+            snapshot.fetchedAt = date
+            snapshot.lastError = errorText
+            marketSnapshots[target.id] = snapshot
+        } else {
+            snapshot.lastError = errorText ?? "Quote payload did not match the selected target"
+            marketSnapshots[target.id] = snapshot
+        }
+
+        guard target.id == self.target.id else { return }
+        lastRefreshAt = date
+        let previousPercent = quote?.percent
+        if let validQuote {
+            quote = validQuote
+            let stale = snapshot.isStale(at: date)
+            isOnline = !stale
+            lastError = snapshot.lastError
+            let sessionNow = MarketRules.session(for: date)
+            session = stale ? .stale : sessionNow
+            if mode == .auto, sessionNow.allowsAutomaticSwitch, !stale,
+               let next = engine.accept(percent: validQuote.percent, at: date, tradingAllowed: true, isStale: false) {
+                applySwitch(
+                    next,
+                    previousPercent: previousPercent,
+                    currentPercent: validQuote.percent,
+                    isInitialSample: isFirstValidQuote,
+                    isTargetRotation: isTargetRotation,
+                    isStale: stale
+                )
+            }
+            isFirstValidQuote = false
+        } else {
+            isOnline = false
+            session = snapshot.quote == nil ? .offline : .stale
+            lastError = snapshot.lastError
+            engine.clearPendingCandidate()
+        }
+        saveState()
     }
 }

@@ -94,17 +94,19 @@ struct ControllerView: View {
                 visualLayer(motion: motion, bubbles: bubbles, date: timeline.date)
                     .zIndex(1)
 
-                GeometryReader { proxy in
-                    quoteBadge
-                        .position(
-                            x: proxy.size.width / 2,
-                            y: FloatingLayout.quoteBadgeCenterY(
-                                stageHeight: proxy.size.height,
-                                petScalePercent: model.petScalePercent,
-                                motionOffset: motion.verticalOffset
+                if model.showMarketPill {
+                    GeometryReader { proxy in
+                        quoteBadge
+                            .position(
+                                x: proxy.size.width / 2,
+                                y: FloatingLayout.quoteBadgeCenterY(
+                                    stageHeight: proxy.size.height,
+                                    petScalePercent: model.petScalePercent,
+                                    motionOffset: motion.verticalOffset
+                                )
                             )
-                        )
-                        .zIndex(3)
+                            .zIndex(3)
+                    }
                 }
             }
             .frame(width: stageSize.width, height: stageSize.height)
@@ -272,9 +274,9 @@ struct ControllerView: View {
         HStack(spacing: 6) {
             Text(model.target.name)
                 .foregroundStyle(.primary.opacity(0.82))
-            if let quote = model.quote, quote.lastPrice.isFinite, quote.percent.isFinite, !quote.isStale {
+            if let quote = model.quote, quote.lastPrice.isFinite, quote.percent.isFinite {
                 Text(String(format: "%.2f", quote.lastPrice))
-                    .foregroundStyle(.primary.opacity(0.82))
+                    .foregroundStyle(marketColor.opacity(model.currentQuoteIsStale ? 0.55 : 0.82))
                 Text(MarketRules.signedPercent(quote.percent))
                     .foregroundStyle(marketColor)
             } else {
@@ -310,8 +312,7 @@ struct ControllerView: View {
     }
 
     private var marketColor: Color {
-        guard let quote = model.quote, quote.percent.isFinite, !quote.isStale else { return .gray }
-        return quote.percent >= 0 ? .red : .green
+        Color(hex: MarketTone.resolve(percent: model.quote?.percent, isStale: model.currentQuoteIsStale).colorHex)
     }
 
     private var speechColor: Color {
@@ -346,6 +347,18 @@ struct ControllerView: View {
             let frame = Int((phase / 1.85) * 8).positiveModulo(8)
             return MotionFrame(row: 5, frame: frame, verticalOffset: 4, isStumbling: false, showsObstacle: false)
         }
+    }
+}
+
+private extension Color {
+    init(hex: String) {
+        let value = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        let number = UInt64(value, radix: 16) ?? 0x8A8F98
+        self.init(
+            red: Double((number >> 16) & 0xff) / 255,
+            green: Double((number >> 8) & 0xff) / 255,
+            blue: Double(number & 0xff) / 255
+        )
     }
 }
 

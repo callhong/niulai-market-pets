@@ -1,0 +1,8 @@
+<Application x:Class="NiuLaiMarketPets.Windows.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             ShutdownMode="OnExplicitShutdown">
+  <Application.Resources>
+    <SolidColorBrush x:Key="PanelBrush" Color="#F2F4F7" Opacity="0.94" />
+  </Application.Resources>
+</Application>

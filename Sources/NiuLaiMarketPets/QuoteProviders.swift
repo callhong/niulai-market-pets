@@ -87,9 +87,10 @@ public struct TencentQuoteProvider: QuoteProviding {
     }
 }
 
-/// Public Tonghuashun index page provider used for the user-selected 883421
-/// target. The page is GBK, but all fields needed here are ASCII numbers and
-/// HTML markers, so parsing the raw byte-preserving UTF-8 view is sufficient.
+/// Public Tonghuashun index page provider used for the selected six-digit
+/// target, including the built-in 883418 micro-cap indicator. The page is
+/// GBK, but all fields needed here are ASCII numbers and HTML markers, so
+/// parsing the raw byte-preserving UTF-8 view is sufficient.
 public struct TonghuashunPublicQuoteProvider: QuoteProviding {
     public let name = "tonghuashun-public"
     public let target: MarketTarget

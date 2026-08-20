@@ -27,6 +27,31 @@ public enum ControlMode: String, Codable, Sendable {
     case manual
 }
 
+/// A platform-neutral market color. UI layers map the hex value to their
+/// native color type; keeping the decision here prevents blue/down or stale
+/// values from drifting between macOS and Windows.
+public enum MarketTone: String, Codable, Sendable {
+    case positive
+    case negative
+    case neutral
+    case unavailable
+
+    public static func resolve(percent: Double?, isStale: Bool = false) -> MarketTone {
+        guard let percent, percent.isFinite, !isStale else { return .unavailable }
+        if percent > 0 { return .positive }
+        if percent < 0 { return .negative }
+        return .neutral
+    }
+
+    public var colorHex: String {
+        switch self {
+        case .positive: return "#E24B4B"
+        case .negative: return "#2F9A62"
+        case .neutral, .unavailable: return "#8A8F98"
+        }
+    }
+}
+
 public enum PetScaleRange {
     public static let minPercent = 60.0
     public static let maxPercent = 160.0
@@ -97,6 +122,8 @@ public struct MarketTarget: Codable, Equatable, Sendable {
         sourceKind: .tonghuashunPublic
     )
 
+    public static let microCap = tonghuashun(code: "883418")!
+
     public static let csiAll = MarketTarget(
         id: "csi-all",
         symbol: "000985",
@@ -133,7 +160,28 @@ public struct MarketTarget: Codable, Equatable, Sendable {
     public static let `default` = thsAll
 
     public static func target(id: String) -> MarketTarget {
-        all.first(where: { $0.id == id }) ?? `default`
+        if let fixed = all.first(where: { $0.id == id }) { return fixed }
+        if id == microCap.id { return microCap }
+        let prefix = "ths-code-"
+        if id.hasPrefix(prefix),
+           let custom = tonghuashun(code: String(id.dropFirst(prefix.count))) {
+            return custom
+        }
+        return `default`
+    }
+
+    public static func tonghuashun(code: String) -> MarketTarget? {
+        guard code.utf8.count == 6,
+              code.utf8.allSatisfy({ $0 >= 48 && $0 <= 57 }) else { return nil }
+        let name = code == "883418" ? "微盘股（883418）" : "同花顺（\(code)）"
+        return MarketTarget(
+            id: "ths-code-\(code)",
+            symbol: code,
+            name: name,
+            eastmoneySecID: nil,
+            tencentSymbol: nil,
+            sourceKind: .tonghuashunPublic
+        )
     }
 
     public static func nextPollingTarget(after id: String) -> MarketTarget {
@@ -177,7 +225,37 @@ public struct Quote: Codable, Equatable, Sendable {
     }
 }
 
+public struct MarketSnapshot: Codable, Equatable, Sendable {
+    public let targetID: String
+    public var quote: Quote?
+    public var fetchedAt: Date?
+    public var lastError: String?
+
+    public init(
+        targetID: String,
+        quote: Quote? = nil,
+        fetchedAt: Date? = nil,
+        lastError: String? = nil
+    ) {
+        self.targetID = targetID
+        self.quote = quote
+        self.fetchedAt = fetchedAt
+        self.lastError = lastError
+    }
+
+    public func isStale(at date: Date, maxAge: TimeInterval = 60) -> Bool {
+        guard let quote, !quote.isStale, quote.percent.isFinite, let fetchedAt else { return true }
+        if date.timeIntervalSince(fetchedAt) > maxAge { return true }
+        return date.timeIntervalSince(quote.quoteTimestamp) > 300
+    }
+
+    public func tone(at date: Date, maxAge: TimeInterval = 60) -> MarketTone {
+        MarketTone.resolve(percent: quote?.percent, isStale: isStale(at: date, maxAge: maxAge))
+    }
+}
+
 public struct PersistedState: Codable, Equatable, Sendable {
+    public var schemaVersion: Int
     public var targetID: String
     public var mode: ControlMode
     public var manualPetID: PetID?
@@ -192,8 +270,10 @@ public struct PersistedState: Codable, Equatable, Sendable {
     public var speechTextScalePercent: Double
     public var indexPollingEnabled: Bool
     public var isMuted: Bool
+    public var showMarketPill: Bool
 
     public init(
+        schemaVersion: Int = 2,
         targetID: String = MarketTarget.default.id,
         mode: ControlMode = .auto,
         manualPetID: PetID? = nil,
@@ -207,8 +287,10 @@ public struct PersistedState: Codable, Equatable, Sendable {
         petScalePercent: Double = PetScaleRange.defaultPercent,
         speechTextScalePercent: Double = SpeechTextScaleRange.defaultPercent,
         indexPollingEnabled: Bool = false,
-        isMuted: Bool = false
+        isMuted: Bool = false,
+        showMarketPill: Bool = true
     ) {
+        self.schemaVersion = max(1, schemaVersion)
         self.targetID = targetID
         self.mode = mode
         self.manualPetID = manualPetID
@@ -223,17 +305,19 @@ public struct PersistedState: Codable, Equatable, Sendable {
         self.speechTextScalePercent = SpeechTextScaleRange.clamped(speechTextScalePercent)
         self.indexPollingEnabled = indexPollingEnabled
         self.isMuted = isMuted
+        self.showMarketPill = showMarketPill
     }
 
     private enum CodingKeys: String, CodingKey {
-        case targetID, mode, manualPetID, activePetID, lastMarketPercent, lastQuoteAt, lastProvider
+        case schemaVersion, targetID, mode, manualPetID, activePetID, lastMarketPercent, lastQuoteAt, lastProvider
         case panelVisible, panelX, panelY, petScalePercent, speechTextScalePercent, indexPollingEnabled
-        case isMuted
+        case isMuted, showMarketPill
         case legacyPetScale = "petScale"
     }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try values.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
         targetID = try values.decodeIfPresent(String.self, forKey: .targetID) ?? MarketTarget.default.id
         mode = try values.decode(ControlMode.self, forKey: .mode)
         manualPetID = try values.decodeIfPresent(PetID.self, forKey: .manualPetID)
@@ -260,10 +344,12 @@ public struct PersistedState: Codable, Equatable, Sendable {
         )
         indexPollingEnabled = try values.decodeIfPresent(Bool.self, forKey: .indexPollingEnabled) ?? false
         isMuted = try values.decodeIfPresent(Bool.self, forKey: .isMuted) ?? false
+        showMarketPill = try values.decodeIfPresent(Bool.self, forKey: .showMarketPill) ?? true
     }
 
     public func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(schemaVersion, forKey: .schemaVersion)
         try values.encode(targetID, forKey: .targetID)
         try values.encode(mode, forKey: .mode)
         try values.encodeIfPresent(manualPetID, forKey: .manualPetID)
@@ -278,6 +364,7 @@ public struct PersistedState: Codable, Equatable, Sendable {
         try values.encode(speechTextScalePercent, forKey: .speechTextScalePercent)
         try values.encode(indexPollingEnabled, forKey: .indexPollingEnabled)
         try values.encode(isMuted, forKey: .isMuted)
+        try values.encode(showMarketPill, forKey: .showMarketPill)
     }
 }
 

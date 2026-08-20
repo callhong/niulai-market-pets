@@ -27,6 +27,69 @@ final class ContextHostingView: NSHostingView<AnyView> {
 }
 
 @MainActor
+final class MarketMenuRowView: NSView {
+    private let checkLabel = NSTextField(labelWithString: "")
+    private let nameLabel = NSTextField(labelWithString: "")
+    private let valueLabel = NSTextField(labelWithString: "")
+    private let target: MarketTarget
+
+    init(target: MarketTarget, snapshot: MarketSnapshot, selected: Bool) {
+        self.target = target
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        checkLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+        checkLabel.alignment = .center
+        nameLabel.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        valueLabel.font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .medium)
+        valueLabel.alignment = .right
+        for label in [checkLabel, nameLabel, valueLabel] {
+            label.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(label)
+        }
+        NSLayoutConstraint.activate([
+            widthAnchor.constraint(equalToConstant: 286),
+            heightAnchor.constraint(equalToConstant: 24),
+            checkLabel.leadingAnchor.constraint(equalTo: leadingAnchor),
+            checkLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            checkLabel.widthAnchor.constraint(equalToConstant: 18),
+            nameLabel.leadingAnchor.constraint(equalTo: checkLabel.trailingAnchor, constant: 4),
+            nameLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            valueLabel.leadingAnchor.constraint(greaterThanOrEqualTo: nameLabel.trailingAnchor, constant: 12),
+            valueLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -2),
+            valueLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            nameLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 120),
+        ])
+        update(snapshot: snapshot, selected: selected)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func update(snapshot: MarketSnapshot, selected: Bool) {
+        checkLabel.stringValue = selected ? "✓" : ""
+        nameLabel.stringValue = target.name
+        let now = Date()
+        let stale = snapshot.isStale(at: now)
+        valueLabel.stringValue = snapshot.quote.map { MarketRules.signedPercent($0.percent) } ?? "--"
+        valueLabel.textColor = NSColor(hex: snapshot.tone(at: now).colorHex)
+        nameLabel.textColor = stale ? NSColor.secondaryLabelColor : NSColor.labelColor
+        checkLabel.textColor = NSColor.controlAccentColor
+    }
+}
+
+private extension NSColor {
+    convenience init(hex: String) {
+        let value = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        let number = UInt64(value, radix: 16) ?? 0x8A8F98
+        self.init(
+            srgbRed: CGFloat((number >> 16) & 0xff) / 255,
+            green: CGFloat((number >> 8) & 0xff) / 255,
+            blue: CGFloat(number & 0xff) / 255,
+            alpha: 1
+        )
+    }
+}
+
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDelegate {
     let model = ControllerModel()
     private var panel: FloatingPanel?
@@ -39,6 +102,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var statusScaleItem: NSMenuItem?
     private var statusSpeechScaleItem: NSMenuItem?
     private var statusMuteItem: NSMenuItem?
+    private var statusPillItem: NSMenuItem?
     private var scalePopover: NSPopover?
     private var speechScalePopover: NSPopover?
     private var cancellables = Set<AnyCancellable>()
@@ -118,6 +182,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         model.selectTarget(MarketTarget.target(id: targetID))
     }
 
+    @objc private func showTonghuashunCodeEditor() {
+        let alert = NSAlert()
+        alert.messageText = "输入同花顺代码"
+        alert.informativeText = "输入 6 位数字，例如 883418（微盘股）。"
+        let field = NSTextField(string: "883418")
+        field.frame = NSRect(x: 0, y: 0, width: 240, height: 24)
+        alert.accessoryView = field
+        alert.addButton(withTitle: "确定")
+        alert.addButton(withTitle: "取消")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        guard let target = MarketTarget.tonghuashun(code: field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            let error = NSAlert()
+            error.messageText = "代码格式不正确"
+            error.informativeText = "请输入 6 位数字的同花顺代码。"
+            error.runModal()
+            return
+        }
+        model.selectTarget(target)
+    }
+
     @objc private func toggleIndexPollingFromMenu(_ sender: NSMenuItem) {
         model.toggleIndexPolling()
     }
@@ -125,6 +209,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     @objc private func toggleMuteFromMenu(_ sender: NSMenuItem) {
         model.toggleMuted()
         statusMuteItem?.state = model.isMuted ? .on : .off
+    }
+
+    @objc private func toggleMarketPillFromMenu(_ sender: NSMenuItem) {
+        model.toggleMarketPill()
+        sender.state = model.showMarketPill ? .on : .off
+        statusPillItem?.state = model.showMarketPill ? .on : .off
     }
 
     @objc private func showScaleEditorFromMenu() {
@@ -178,6 +268,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     func menuWillOpen(_ menu: NSMenu) {
         updateStatusMenu(menu)
+        scheduleSnapshotRefresh(for: menu)
     }
 
     private func observeLayoutChanges() {
@@ -237,6 +328,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         targetItem.submenu = makeTargetSubmenu()
         menu.addItem(targetItem)
 
+        let pill = NSMenuItem(title: "显示行情标签", action: #selector(toggleMarketPillFromMenu(_:)), keyEquivalent: "")
+        pill.target = self
+        pill.state = model.showMarketPill ? .on : .off
+        menu.addItem(pill)
+
         menu.addItem(.separator())
         let scale = NSMenuItem(
             title: "调节宠物大小（\(Int(model.petScalePercent.rounded()))%）…",
@@ -265,6 +361,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         )
         visibility.target = self
         menu.addItem(visibility)
+        scheduleSnapshotRefresh(for: menu)
         return menu
     }
 
@@ -299,10 +396,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 let item = NSMenuItem(title: target.name, action: #selector(selectTargetFromMenu(_:)), keyEquivalent: "")
                 item.target = self
                 item.representedObject = target.id
-                item.state = !model.isIndexPollingEnabled && model.target.id == target.id ? .on : .off
+                let selected = !model.isIndexPollingEnabled && model.target.id == target.id
+                item.state = selected ? .on : .off
+                item.view = MarketMenuRowView(target: target, snapshot: model.snapshot(for: target), selected: selected)
                 submenu.addItem(item)
             }
         }
+        submenu.addItem(.separator())
+        let microCap = MarketTarget.microCap
+        let microCapItem = NSMenuItem(title: microCap.name, action: #selector(selectTargetFromMenu(_:)), keyEquivalent: "")
+        microCapItem.target = self
+        microCapItem.representedObject = microCap.id
+        microCapItem.state = !model.isIndexPollingEnabled && model.target.id == microCap.id ? .on : .off
+        microCapItem.view = MarketMenuRowView(target: microCap, snapshot: model.snapshot(for: microCap), selected: microCapItem.state == .on)
+        submenu.addItem(microCapItem)
+        if model.target.sourceKind == .tonghuashunPublic && !MarketTarget.all.contains(where: { $0.id == model.target.id }) && model.target.id != microCap.id {
+            let custom = model.target
+            let customItem = NSMenuItem(title: custom.name, action: #selector(selectTargetFromMenu(_:)), keyEquivalent: "")
+            customItem.target = self
+            customItem.representedObject = custom.id
+            customItem.state = !model.isIndexPollingEnabled && model.target.id == custom.id ? .on : .off
+            customItem.view = MarketMenuRowView(target: custom, snapshot: model.snapshot(for: custom), selected: customItem.state == .on)
+            submenu.addItem(customItem)
+        }
+        let manual = NSMenuItem(title: "手动输入同花顺代码…", action: #selector(showTonghuashunCodeEditor), keyEquivalent: "")
+        manual.target = self
+        submenu.addItem(manual)
         submenu.addItem(.separator())
         let polling = NSMenuItem(
             title: "轮询指数（每 60 秒）",
@@ -319,18 +438,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private func setupStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         guard let button = item.button else { return }
-        let icon = NSImage(systemSymbolName: "pawprint.fill", accessibilityDescription: "牛来行情宠物")
+        let icon = Bundle.main.url(forResource: "BrandMark", withExtension: "svg").flatMap { NSImage(contentsOf: $0) }
         icon?.isTemplate = true
         button.image = icon
-        // Keep a short text fallback: on crowded menu bars the image can be
-        // visually lost or moved into the hidden status-item area.
-        button.title = "牛来"
-        button.imagePosition = .imageLeading
+        button.title = ""
+        button.imagePosition = .imageOnly
         button.imageScaling = .scaleProportionallyDown
-        button.font = NSFont.systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
         button.toolTip = "牛来行情宠物"
         button.setAccessibilityLabel("牛来行情宠物")
-        item.length = 48
+        item.length = 24
         item.isVisible = true
 
         let menu = NSMenu()
@@ -351,6 +467,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         statusTargetItems = targetItem.submenu?.items.filter { $0.representedObject is String } ?? []
         statusPollingItem = targetItem.submenu?.items.first(where: { $0.action == #selector(toggleIndexPollingFromMenu(_:)) })
         menu.addItem(targetItem)
+
+        let pillItem = NSMenuItem(title: "显示行情标签", action: #selector(toggleMarketPillFromMenu(_:)), keyEquivalent: "")
+        pillItem.target = self
+        menu.addItem(pillItem)
+        statusPillItem = pillItem
 
         let scaleItem = NSMenuItem(title: "调节宠物大小…", action: #selector(showScaleEditorFromMenu), keyEquivalent: "")
         scaleItem.target = self
@@ -385,7 +506,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var statusMenu: NSMenu?
 
     private func updateStatusMenu(_ menu: NSMenu) {
-        statusSummaryItem?.title = "\(model.target.name) \(MarketRules.signedPercent(model.quote?.percent)) · \(model.session.rawValue)"
+        let summary = "\(model.target.name) \(MarketRules.signedPercent(model.quote?.percent)) · \(model.session.rawValue)"
+        let tone = MarketTone.resolve(percent: model.quote?.percent, isStale: model.currentQuoteIsStale)
+        statusSummaryItem?.attributedTitle = NSAttributedString(
+            string: summary,
+            attributes: [.foregroundColor: NSColor(hex: tone.colorHex)]
+        )
         for item in statusShapeItems {
             guard let value = item.representedObject as? String else { continue }
             item.state = value == ControlMode.auto.rawValue
@@ -394,13 +520,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
         for item in statusTargetItems {
             guard let targetID = item.representedObject as? String else { continue }
-            item.state = !model.isIndexPollingEnabled && model.target.id == targetID ? .on : .off
+            let selected = !model.isIndexPollingEnabled && model.target.id == targetID
+            item.state = selected ? .on : .off
+            let target = MarketTarget.target(id: targetID)
+            if let row = item.view as? MarketMenuRowView {
+                row.update(snapshot: model.snapshot(for: target), selected: selected)
+            }
         }
         statusPollingItem?.state = model.isIndexPollingEnabled ? .on : .off
         statusScaleItem?.title = "调节宠物大小（\(Int(model.petScalePercent.rounded()))%）…"
         statusSpeechScaleItem?.title = "调节台词字号（\(Int(model.speechTextScalePercent.rounded()))%）…"
         statusMuteItem?.state = model.isMuted ? .on : .off
+        statusPillItem?.state = model.showMarketPill ? .on : .off
         _ = menu
+    }
+
+    private func scheduleSnapshotRefresh(for menu: NSMenu) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.model.refreshSnapshotsForMenu()
+            self.updateStatusMenu(menu)
+            for item in menu.items {
+                if let submenu = item.submenu { self.updateTargetRows(in: submenu) }
+            }
+        }
+    }
+
+    private func updateTargetRows(in menu: NSMenu) {
+        for item in menu.items {
+            guard let targetID = item.representedObject as? String,
+                  let row = item.view as? MarketMenuRowView else { continue }
+            let target = MarketTarget.target(id: targetID)
+            row.update(
+                snapshot: model.snapshot(for: target),
+                selected: !model.isIndexPollingEnabled && model.target.id == targetID
+            )
+        }
     }
 
     private func requestNotifications() {
