@@ -3,7 +3,7 @@ name: Windows build
 on:
   push:
     branches:
-      - feature/windows-market-alerts
+      - main
   workflow_dispatch:
 
 permissions:
