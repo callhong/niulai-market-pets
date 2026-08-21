@@ -1,17 +1,17 @@
 # NiuLai Market Pets
 
-牛来行情宠物是一个完全独立的 macOS 桌面悬浮宠物：行情变化时，它会自动变形、发光、出声。桌面上始终只显示一只宠物，可通过右键菜单或顶部状态栏切换目标、形态、大小、台词字号、轮询和静音。
+牛来行情宠物是一个完全独立的 macOS/Windows 桌面悬浮宠物：行情变化时，它会自动变形、发光、出声。桌面上始终只显示一只宠物，可通过 macOS 右键/状态栏菜单或 Windows 宠物/托盘菜单切换目标、形态、大小、台词字号、轮询和静音。
 
-它不要求其他桌面软件、配置文件或外置资源目录；三套宠物、动效和本地音效都随应用包发布。macOS 支持 13+；Windows 1.1.0 提供 Windows 10/11 `win-x64` 独立 WPF 安装器和 ZIP。
+它不要求其他桌面软件或外置宠物目录；三套宠物、WebP 动效和本地音效都随应用包发布。macOS 支持 13+；Windows 1.1.0 提供 Windows 10/11 `win-x64` 独立 WPF 安装器和 ZIP。
 
-## 最新版本：Windows 1.1.0
+## 最新版本：macOS + Windows 1.1.0
 
-Windows 1.1.0 是本项目首次面向普通 Windows 用户的完整桌面版发布：双击安装、开始菜单卸载、原地升级和应用内检查更新都已打通。它只支持 Windows 10/11 `win-x64`，不需要管理员权限，也不包含 ARM64、MSIX、商店发布或后台静默更新。
+1.1.0 是 macOS 与 Windows 的统一功能版本。macOS 提供原生菜单栏、通知、DMG 和用户级 LaunchAgent；Windows 提供透明置顶 WPF 浮窗、托盘、当前用户安装/卸载和便携 ZIP。Windows 只支持 `win-x64`，不包含 ARM64、MSIX、商店发布或后台静默更新。
 
-- [下载 Windows 安装器](https://github.com/callhong/niulai-market-pets/releases/download/v1.1.0/NiuLaiMarketPets-windows-x64-setup.exe) · [下载便携 ZIP](https://github.com/callhong/niulai-market-pets/releases/download/v1.1.0/NiuLaiMarketPets-windows-x64.zip) · [查看 SHA256](https://github.com/callhong/niulai-market-pets/releases/tag/v1.1.0)
+- macOS 构建产物：`dist/NiuLaiMarketPets-1.1.0.dmg`；Windows 构建产物由 GitHub Actions 上传 ZIP、SHA256 和可下载 artifact。统一 Release 会在双端实机验收后创建。
 - 透明置顶的单宠物悬浮窗、真实 WebP 帧动画、牛头托盘图标、宠物右键菜单和托盘气泡降级。
 - 六个固定指数、同花顺微盘股 `883418` 指标，以及可长期保存的股票/ETF 自选池；行情名称从返回数据更新，不再显示错误名称。
-- 红涨、绿跌、零值/离线/过期灰色，头部贴近式柔光；自动形态边界、声音、静音、台词气泡和行情标签规则与验收结果一致。
+- 红涨、绿跌、零值/离线/过期灰色，头部贴近式柔光；自动形态边界、声音、静音、台词气泡、行情药丸和通知规则两端一致。
 - 中文安装器、中文菜单、原地升级、卸载回滚、当前用户开机启动和原子配置持久化。
 
 Windows 安装包没有商业 Authenticode 签名。首次下载请先用 Release 页面提供的 SHA256 校验文件；如果 SmartScreen 提示“Windows 已保护你的电脑”，按系统的“更多信息 → 仍要运行”继续，不要关闭 SmartScreen。
@@ -26,7 +26,7 @@ Windows 安装包没有商业 Authenticode 签名。首次下载请先用 Releas
 | 0% 到 1%（含边界） | 牛来 | 红色光晕 | 牛来 |
 | 大于 1% | 豹拉 | 红色光晕 | 豹拉 |
 
-切换包含防抖、冷却、交易时段判断、主备行情源和离线降级；临界值变化、手动切换和开盘后的首次有效行情都可以播放音效。静音按钮可以随时关闭声音，设置会持久化。
+切换包含 20 秒防抖、120 秒冷却、主备行情源和离线降级；只有有效行情能切换形态，通知还会避开非交易时段、过期行情和重复边界。临界值变化、手动切换和首次有效行情都可以播放音效，单纯轮换目标不播放。静音按钮可以随时关闭声音，设置会持久化。
 
 ## 最新预览
 
@@ -55,11 +55,12 @@ Windows 安装包没有商业 Authenticode 签名。首次下载请先用 Releas
 - 单宠物悬浮窗：牛来、豹拉、牛妈不会同时显示。
 - 自动模式和手动模式；手动模式优先于自动切换。
 - 上证指数、中证全指、同花顺全 A（沪深）、创业板指、科创 50、国证 2000。
-- 指数菜单额外支持同花顺 `883418` 微盘股，也可手动输入任意 6 位同花顺代码；它不加入六个固定指数的 60 秒轮询。
+- 指数菜单额外支持同花顺 `883418` 微盘股，也可手动输入任意 6 位股票/ETF 代码并保存到本地自选池；它们不加入六个固定指数的 60 秒轮询。
 - 统一规则：小于 `0%` 为牛妈，`0%～1.00%` 为牛来，大于 `1.00%` 为豹拉；涨为红色，跌为绿色，零值、离线和过期为灰色。
 - 轮询指数每 60 秒推进一个目标；轮询开启后与具体指数选择互斥。
+- 自选池可独立每 60 秒轮询；固定指数轮询、自选池轮询和具体目标选择三者互斥。
 - 间歇台词气泡、点击连击台词、红涨绿跌光晕和四个本地 WAV 音效；点击、手动切换和真正的形态变化会按静音设置播放。
-- 一级菜单可独立勾选“显示行情标签”，关闭后只隐藏宠物下方的指数、点数和涨跌幅标签。
+- 一级菜单可独立勾选“显示行情药丸”，关闭后只隐藏宠物下方的指数、点数和涨跌幅胶囊。
 - 宠物大小和台词字号都使用百分比滑块调节。
 - 顶部状态栏与右键菜单保持一致的两级入口：形态、指数。
 - 登录启动、状态持久化、行情故障降级和可回滚安装。
@@ -68,7 +69,7 @@ Windows 安装包没有商业 Authenticode 签名。首次下载请先用 Releas
 
 从 [Releases](https://github.com/callhong/niulai-market-pets/releases) 下载最新 DMG，打开后双击 Install NiuLai Market Pets.command。安装器会将独立应用放入当前用户的 Applications 目录，并安装用户级 LaunchAgent。
 
-也可以直接下载当前版本：[NiuLaiMarketPets-1.0.4.dmg](https://github.com/callhong/niulai-market-pets/releases/download/v1.0.4/NiuLaiMarketPets-1.0.4.dmg)。
+当前源码构建的 DMG 为 `dist/NiuLaiMarketPets-1.1.0.dmg`；在统一 Release 创建前，请使用本地构建产物或 Actions artifact。
 
 安装器会：
 
@@ -81,7 +82,7 @@ Windows 安装包没有商业 Authenticode 签名。首次下载请先用 Releas
 
 ### Windows 极简安装、升级与卸载
 
-从 [v1.1.0 Release](https://github.com/callhong/niulai-market-pets/releases/tag/v1.1.0) 下载 `NiuLaiMarketPets-windows-x64-setup.exe`，双击即可安装到当前用户目录，不需要管理员权限。已经安装过旧版本时，直接运行新的安装器即可原地升级，不必先卸载；`%APPDATA%\NiuLaiMarketPets\config.json` 会保留。开始菜单中的“卸载 牛来行情宠物”可完整卸载应用并保留可回滚配置。便携 ZIP 仍可用于不登记安装的临时运行。
+从 GitHub Actions artifact 或统一 Release 下载 `NiuLaiMarketPets-windows-x64-setup.exe`，双击即可安装到当前用户目录，不需要管理员权限。已经安装过旧版本时，直接运行新的安装器即可原地升级，不必先卸载；`%APPDATA%\NiuLaiMarketPets\config.json` 会保留。开始菜单中的“卸载 牛来行情宠物”可完整卸载应用并保留可回滚配置。便携 ZIP 仍可用于不登记安装的临时运行。
 
 应用菜单和托盘菜单中的“检查更新…”会查询 GitHub Release；发现带 SHA256 文件的 Windows 安装器后，用户确认即可下载、校验并启动安装器。它不做后台静默更新，也不绕过 Windows Defender SmartScreen。无商业签名时，若出现“Windows 已保护你的电脑”，先校验发布页 SHA256，再按系统提示处理。
 
@@ -110,13 +111,13 @@ Windows 构建：
     dotnet test platforms/windows/NiuLaiMarketPets.Windows.Tests/NiuLaiMarketPets.Windows.Tests.csproj -c Release
     cd platforms/windows && dotnet publish -c Release -r win-x64 --self-contained true
 
-Windows 的 CI 会在 `main` 和功能分支上测试、发布 `win-x64`、构建安装器并上传 artifact；`v1.1.0` Release 同时提供 ZIP、安装器和 SHA256。Windows 核心测试消费 `platforms/shared/market-model-cases.json`，CI 成功标记为 `WINDOWS_BUILD_PASS`，Windows GUI 已完成用户实机验收并标记为 `WINDOWS_VISUAL_PASS`。
+Windows 的 CI 会在 `main` 和功能分支上测试、发布 `win-x64`、构建安装器并上传 ZIP/SHA256 artifact；Windows 核心测试消费 `platforms/shared/market-model-cases.json`，CI 成功只标记为 `WINDOWS_BUILD_PASS`，不能代替 Windows GUI 实机验收。
 
 卸载脚本不会删除回滚备份；如需彻底清理，可在确认不再需要恢复后手动删除 ~/Library/Application Support/NiuLaiMarketPets。
 
 ## 项目状态
 
-macOS 当前公开版本为 1.0.4，Windows 当前公开版本为 1.1.0。行情提供商使用公开网页接口，接口变更、休市和网络故障都可能导致报价离线或短暂过期；界面会保留最后一个有效报价并将过期值置灰。本项目是娱乐化可视化，不构成投资建议。
+macOS 与 Windows 当前代码版本均为 1.1.0；统一标签和 GitHub Release 等待双端实机验收后创建。行情提供商使用公开网页接口，接口变更、休市和网络故障都可能导致报价离线或短暂过期；界面会保留最后一个有效报价并将过期值置灰。本项目是娱乐化可视化，不构成投资建议。
 
 ## 参与贡献
 

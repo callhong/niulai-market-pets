@@ -32,9 +32,11 @@ final class MarketMenuRowView: NSView {
     private let nameLabel = NSTextField(labelWithString: "")
     private let valueLabel = NSTextField(labelWithString: "")
     private let target: MarketTarget
+    private let fallbackName: String
 
-    init(target: MarketTarget, snapshot: MarketSnapshot, selected: Bool) {
+    init(target: MarketTarget, snapshot: MarketSnapshot, selected: Bool, displayName: String? = nil) {
         self.target = target
+        self.fallbackName = displayName ?? target.name
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         checkLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
@@ -66,7 +68,7 @@ final class MarketMenuRowView: NSView {
 
     func update(snapshot: MarketSnapshot, selected: Bool) {
         checkLabel.stringValue = selected ? "✓" : ""
-        nameLabel.stringValue = target.name
+        nameLabel.stringValue = snapshot.quote?.name ?? fallbackName
         let now = Date()
         let stale = snapshot.isStale(at: now)
         valueLabel.stringValue = snapshot.quote.map { MarketRules.signedPercent($0.percent) } ?? "--"
@@ -99,6 +101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var statusShapeItems: [NSMenuItem] = []
     private var statusTargetItems: [NSMenuItem] = []
     private var statusPollingItem: NSMenuItem?
+    private var statusTargetMenuItem: NSMenuItem?
     private var statusScaleItem: NSMenuItem?
     private var statusSpeechScaleItem: NSMenuItem?
     private var statusMuteItem: NSMenuItem?
@@ -192,18 +195,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         alert.addButton(withTitle: "确定")
         alert.addButton(withTitle: "取消")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        guard let target = MarketTarget.tonghuashun(code: field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+        guard model.addWatchlistCode(field.stringValue) != nil else {
             let error = NSAlert()
             error.messageText = "代码格式不正确"
             error.informativeText = "请输入 6 位数字的同花顺代码。"
             error.runModal()
             return
         }
-        model.selectTarget(target)
     }
 
     @objc private func toggleIndexPollingFromMenu(_ sender: NSMenuItem) {
         model.toggleIndexPolling()
+    }
+
+    @objc private func toggleWatchlistPollingFromMenu(_ sender: NSMenuItem) {
+        model.toggleWatchlistPolling()
+    }
+
+    @objc private func removeWatchlistCodeFromMenu() {
+        let alert = NSAlert()
+        alert.messageText = "移除自选代码"
+        alert.informativeText = "输入要从本地自选池移除的 6 位代码。"
+        let field = NSTextField(string: "")
+        field.frame = NSRect(x: 0, y: 0, width: 240, height: 24)
+        alert.accessoryView = field
+        alert.addButton(withTitle: "移除")
+        alert.addButton(withTitle: "取消")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        model.removeWatchlistCode(field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     @objc private func toggleMuteFromMenu(_ sender: NSMenuItem) {
@@ -267,6 +286,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
 
     func menuWillOpen(_ menu: NSMenu) {
+        if let statusMenu, menu === statusMenu {
+            rebuildStatusTargetMenu()
+        }
         updateStatusMenu(menu)
         scheduleSnapshotRefresh(for: menu)
     }
@@ -328,7 +350,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         targetItem.submenu = makeTargetSubmenu()
         menu.addItem(targetItem)
 
-        let pill = NSMenuItem(title: "显示行情标签", action: #selector(toggleMarketPillFromMenu(_:)), keyEquivalent: "")
+        let pill = NSMenuItem(title: "显示行情药丸", action: #selector(toggleMarketPillFromMenu(_:)), keyEquivalent: "")
         pill.target = self
         pill.state = model.showMarketPill ? .on : .off
         menu.addItem(pill)
@@ -396,9 +418,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 let item = NSMenuItem(title: target.name, action: #selector(selectTargetFromMenu(_:)), keyEquivalent: "")
                 item.target = self
                 item.representedObject = target.id
-                let selected = !model.isIndexPollingEnabled && model.target.id == target.id
+                let selected = !model.isIndexPollingEnabled && !model.isWatchlistPollingEnabled && model.target.id == target.id
                 item.state = selected ? .on : .off
-                item.view = MarketMenuRowView(target: target, snapshot: model.snapshot(for: target), selected: selected)
+                item.view = MarketMenuRowView(
+                    target: target,
+                    snapshot: model.snapshot(for: target),
+                    selected: selected,
+                    displayName: model.displayName(for: target)
+                )
                 submenu.addItem(item)
             }
         }
@@ -407,19 +434,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let microCapItem = NSMenuItem(title: microCap.name, action: #selector(selectTargetFromMenu(_:)), keyEquivalent: "")
         microCapItem.target = self
         microCapItem.representedObject = microCap.id
-        microCapItem.state = !model.isIndexPollingEnabled && model.target.id == microCap.id ? .on : .off
-        microCapItem.view = MarketMenuRowView(target: microCap, snapshot: model.snapshot(for: microCap), selected: microCapItem.state == .on)
+        microCapItem.state = !model.isIndexPollingEnabled && !model.isWatchlistPollingEnabled && model.target.id == microCap.id ? .on : .off
+        microCapItem.view = MarketMenuRowView(
+            target: microCap,
+            snapshot: model.snapshot(for: microCap),
+            selected: microCapItem.state == .on,
+            displayName: model.displayName(for: microCap)
+        )
         submenu.addItem(microCapItem)
-        if model.target.sourceKind == .tonghuashunPublic && !MarketTarget.all.contains(where: { $0.id == model.target.id }) && model.target.id != microCap.id {
-            let custom = model.target
-            let customItem = NSMenuItem(title: custom.name, action: #selector(selectTargetFromMenu(_:)), keyEquivalent: "")
-            customItem.target = self
-            customItem.representedObject = custom.id
-            customItem.state = !model.isIndexPollingEnabled && model.target.id == custom.id ? .on : .off
-            customItem.view = MarketMenuRowView(target: custom, snapshot: model.snapshot(for: custom), selected: customItem.state == .on)
-            submenu.addItem(customItem)
+        if !model.customTargets.isEmpty {
+            submenu.addItem(.separator())
+            let watchlist = NSMenuItem(title: "自选池", action: nil, keyEquivalent: "")
+            watchlist.submenu = makeWatchlistSubmenu()
+            submenu.addItem(watchlist)
         }
-        let manual = NSMenuItem(title: "手动输入同花顺代码…", action: #selector(showTonghuashunCodeEditor), keyEquivalent: "")
+        let manual = NSMenuItem(title: "输入股票／ETF代码…", action: #selector(showTonghuashunCodeEditor), keyEquivalent: "")
         manual.target = self
         submenu.addItem(manual)
         submenu.addItem(.separator())
@@ -432,6 +461,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         polling.toolTip = "开启后每 60 秒自动切换到下一个指数目标"
         polling.state = model.isIndexPollingEnabled ? .on : .off
         submenu.addItem(polling)
+        return submenu
+    }
+
+    private func makeWatchlistSubmenu() -> NSMenu {
+        let submenu = NSMenu()
+        submenu.autoenablesItems = false
+        for target in model.customTargets {
+            let item = NSMenuItem(title: target.name, action: #selector(selectTargetFromMenu(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = target.id
+            let selected = !model.isIndexPollingEnabled && !model.isWatchlistPollingEnabled && model.target.id == target.id
+            item.state = selected ? .on : .off
+            item.view = MarketMenuRowView(
+                target: target,
+                snapshot: model.snapshot(for: target),
+                selected: selected,
+                displayName: model.displayName(for: target)
+            )
+            submenu.addItem(item)
+        }
+        let polling = NSMenuItem(
+            title: "轮询自选池（每 60 秒）",
+            action: #selector(toggleWatchlistPollingFromMenu(_:)),
+            keyEquivalent: ""
+        )
+        polling.target = self
+        polling.state = model.isWatchlistPollingEnabled ? .on : .off
+        submenu.addItem(.separator())
+        submenu.addItem(polling)
+        let remove = NSMenuItem(title: "移除自选代码…", action: #selector(removeWatchlistCodeFromMenu), keyEquivalent: "")
+        remove.target = self
+        submenu.addItem(remove)
         return submenu
     }
 
@@ -464,11 +525,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
         let targetItem = NSMenuItem(title: "指数", action: nil, keyEquivalent: "")
         targetItem.submenu = makeTargetSubmenu()
+        statusTargetMenuItem = targetItem
         statusTargetItems = targetItem.submenu?.items.filter { $0.representedObject is String } ?? []
         statusPollingItem = targetItem.submenu?.items.first(where: { $0.action == #selector(toggleIndexPollingFromMenu(_:)) })
         menu.addItem(targetItem)
 
-        let pillItem = NSMenuItem(title: "显示行情标签", action: #selector(toggleMarketPillFromMenu(_:)), keyEquivalent: "")
+        let pillItem = NSMenuItem(title: "显示行情药丸", action: #selector(toggleMarketPillFromMenu(_:)), keyEquivalent: "")
         pillItem.target = self
         menu.addItem(pillItem)
         statusPillItem = pillItem
@@ -506,7 +568,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var statusMenu: NSMenu?
 
     private func updateStatusMenu(_ menu: NSMenu) {
-        let summary = "\(model.target.name) \(MarketRules.signedPercent(model.quote?.percent)) · \(model.session.rawValue)"
+        let summary = "\(model.displayTargetName) \(MarketRules.signedPercent(model.quote?.percent)) · \(model.session.rawValue)"
         let tone = MarketTone.resolve(percent: model.quote?.percent, isStale: model.currentQuoteIsStale)
         statusSummaryItem?.attributedTitle = NSAttributedString(
             string: summary,
@@ -520,7 +582,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
         for item in statusTargetItems {
             guard let targetID = item.representedObject as? String else { continue }
-            let selected = !model.isIndexPollingEnabled && model.target.id == targetID
+            let selected = !model.isIndexPollingEnabled && !model.isWatchlistPollingEnabled && model.target.id == targetID
             item.state = selected ? .on : .off
             let target = MarketTarget.target(id: targetID)
             if let row = item.view as? MarketMenuRowView {
@@ -533,6 +595,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         statusMuteItem?.state = model.isMuted ? .on : .off
         statusPillItem?.state = model.showMarketPill ? .on : .off
         _ = menu
+    }
+
+    private func rebuildStatusTargetMenu() {
+        guard let targetItem = statusTargetMenuItem else { return }
+        targetItem.submenu = makeTargetSubmenu()
+        statusTargetItems = targetItem.submenu?.items.filter { $0.representedObject is String } ?? []
+        statusPollingItem = targetItem.submenu?.items.first(where: { $0.action == #selector(toggleIndexPollingFromMenu(_:)) })
     }
 
     private func scheduleSnapshotRefresh(for menu: NSMenu) {
@@ -548,12 +617,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     private func updateTargetRows(in menu: NSMenu) {
         for item in menu.items {
+            if let submenu = item.submenu { updateTargetRows(in: submenu) }
             guard let targetID = item.representedObject as? String,
                   let row = item.view as? MarketMenuRowView else { continue }
             let target = MarketTarget.target(id: targetID)
             row.update(
                 snapshot: model.snapshot(for: target),
-                selected: !model.isIndexPollingEnabled && model.target.id == targetID
+                selected: !model.isIndexPollingEnabled && !model.isWatchlistPollingEnabled && model.target.id == targetID
             )
         }
     }

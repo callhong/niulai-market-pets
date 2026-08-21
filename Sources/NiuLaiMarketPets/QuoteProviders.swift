@@ -1,3 +1,4 @@
+import CoreFoundation
 import Foundation
 
 public protocol QuoteProviding: Sendable {
@@ -24,7 +25,7 @@ public struct EastmoneyQuoteProvider: QuoteProviding {
         ]
         var request = URLRequest(url: components.url!)
         request.timeoutInterval = 8
-        request.setValue("Mozilla/5.0 NiuLaiMarketPets/1.0", forHTTPHeaderField: "User-Agent")
+        request.setValue("Mozilla/5.0 NiuLaiMarketPets/1.1.0", forHTTPHeaderField: "User-Agent")
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw ProviderError.invalidHTTP
@@ -38,9 +39,10 @@ public struct EastmoneyQuoteProvider: QuoteProviding {
             rawPrevious > 0
         else { throw ProviderError.invalidPayload }
         let timestamp = timestampFromEastmoney(payload["f86"]) ?? Date()
+        let displayName = stringValue(payload["f58"]) ?? target.name
         return Quote(
             symbol: target.symbol,
-            name: target.name,
+            name: displayName,
             lastPrice: rawLast / 100,
             previousClose: rawPrevious / 100,
             quoteTimestamp: timestamp,
@@ -63,12 +65,12 @@ public struct TencentQuoteProvider: QuoteProviding {
         guard let symbol = target.tencentSymbol else { throw ProviderError.unsupportedTarget }
         var request = URLRequest(url: URL(string: "https://qt.gtimg.cn/q=\(symbol)")!)
         request.timeoutInterval = 8
-        request.setValue("Mozilla/5.0 NiuLaiMarketPets/1.0", forHTTPHeaderField: "User-Agent")
+        request.setValue("Mozilla/5.0 NiuLaiMarketPets/1.1.0", forHTTPHeaderField: "User-Agent")
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw ProviderError.invalidHTTP
         }
-        let text = String(decoding: data, as: UTF8.self)
+        let text = marketText(from: data)
         let fields = text.split(separator: "~", omittingEmptySubsequences: false).map(String.init)
         guard fields.count > 5, let last = Double(fields[3]), let previous = Double(fields[4]), previous > 0 else {
             throw ProviderError.invalidPayload
@@ -76,9 +78,12 @@ public struct TencentQuoteProvider: QuoteProviding {
         let date = fields.count > 30 ? fields[30] : ""
         let time = fields.count > 31 ? fields[31] : ""
         let timestamp = timestampFromTencent(date: date, time: time) ?? Date()
+        let displayName = fields.count > 1 && !fields[1].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? fields[1].trimmingCharacters(in: .whitespacesAndNewlines)
+            : target.name
         return Quote(
             symbol: target.symbol,
-            name: target.name,
+            name: displayName,
             lastPrice: last,
             previousClose: previous,
             quoteTimestamp: timestamp,
@@ -88,9 +93,8 @@ public struct TencentQuoteProvider: QuoteProviding {
 }
 
 /// Public Tonghuashun index page provider used for the selected six-digit
-/// target, including the built-in 883418 micro-cap indicator. The page is
-/// GBK, but all fields needed here are ASCII numbers and HTML markers, so
-/// parsing the raw byte-preserving UTF-8 view is sufficient.
+/// target, including the built-in 883418 micro-cap indicator. It accepts both
+/// UTF-8 and GB18030/GBK responses so the returned Chinese name remains real.
 public struct TonghuashunPublicQuoteProvider: QuoteProviding {
     public let name = "tonghuashun-public"
     public let target: MarketTarget
@@ -105,21 +109,27 @@ public struct TonghuashunPublicQuoteProvider: QuoteProviding {
         guard target.sourceKind == .tonghuashunPublic else { throw ProviderError.unsupportedTarget }
         var request = URLRequest(url: URL(string: "https://q.10jqka.com.cn/thshy/detail/code/\(target.symbol)/")!)
         request.timeoutInterval = 10
-        request.setValue("Mozilla/5.0 NiuLaiMarketPets/1.0", forHTTPHeaderField: "User-Agent")
+        request.setValue("Mozilla/5.0 NiuLaiMarketPets/1.1.0", forHTTPHeaderField: "User-Agent")
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw ProviderError.invalidHTTP
         }
-        let html = String(decoding: data, as: UTF8.self)
+        let gb18030 = String.Encoding(rawValue: CFStringConvertEncodingToNSStringEncoding(
+            CFStringEncoding(CFStringEncodings.GB_18030_2000.rawValue)
+        ))
+        let html = String(data: data, encoding: .utf8)
+            ?? String(data: data, encoding: gb18030)
+            ?? String(decoding: data, as: UTF8.self)
         guard
             let last = TonghuashunHTMLParser.lastPrice(in: html),
             let previous = TonghuashunHTMLParser.previousClose(in: html),
             last > 0,
             previous > 0
         else { throw ProviderError.invalidPayload }
+        let displayName = TonghuashunHTMLParser.name(in: html) ?? target.name
         return Quote(
             symbol: target.symbol,
-            name: target.name,
+            name: displayName,
             lastPrice: last,
             previousClose: previous,
             quoteTimestamp: Date(),
@@ -225,6 +235,17 @@ enum TonghuashunHTMLParser {
         return number(values[1])
     }
 
+    static func name(in html: String) -> String? {
+        guard let start = html.range(of: "<h3"),
+              let open = html.range(of: ">", range: start.upperBound..<html.endIndex),
+              let end = html.range(of: "</h3>", range: open.upperBound..<html.endIndex)
+        else { return nil }
+        let value = String(html[open.upperBound..<end.lowerBound])
+            .replacingOccurrences(of: "&nbsp;", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
+    }
+
     private static func value(after marker: String, before endMarker: String, in html: String) -> String? {
         guard let start = html.range(of: marker),
               let open = html.range(of: ">", range: start.upperBound..<html.endIndex),
@@ -252,6 +273,24 @@ private func number(_ value: Any?) -> Double? {
     if let value = value as? NSNumber { return value.doubleValue }
     if let value = value as? String { return Double(value) }
     return nil
+}
+
+private func stringValue(_ value: Any?) -> String? {
+    if let value = value as? String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+    return nil
+}
+
+private func marketText(from data: Data) -> String {
+    if let utf8 = String(data: data, encoding: .utf8), !utf8.contains("\u{fffd}") {
+        return utf8
+    }
+    let gb18030 = String.Encoding(rawValue: CFStringConvertEncodingToNSStringEncoding(
+        CFStringEncoding(CFStringEncodings.GB_18030_2000.rawValue)
+    ))
+    return String(data: data, encoding: gb18030) ?? String(decoding: data, as: UTF8.self)
 }
 
 private func timestampFromEastmoney(_ value: Any?) -> Date? {

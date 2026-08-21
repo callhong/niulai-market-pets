@@ -76,7 +76,6 @@ enum FloatingLayout {
 struct ControllerView: View {
     @ObservedObject var model: ControllerModel
     let onToggleVisibility: () -> Void
-    @State private var burstStartedAt: Date?
 
     private let spriteSize = CGSize(width: 252, height: 273)
 
@@ -87,7 +86,7 @@ struct ControllerView: View {
             let bubbles = SpeechPlanner.bubbles(
                 for: model.activePet,
                 at: timeline.date,
-                burstStartedAt: burstStartedAt,
+                burstStartedAt: model.speechBurstStartedAt,
                 textScalePercent: model.speechTextScalePercent
             )
             ZStack {
@@ -112,11 +111,8 @@ struct ControllerView: View {
             .frame(width: stageSize.width, height: stageSize.height)
             .contentShape(Rectangle())
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(model.activePet.displayName)桌面宠物，目标\(model.target.name)，\(bubbles.map(\.text).joined(separator: "、"))")
+            .accessibilityLabel("\(model.activePet.displayName)桌面宠物，目标\(model.displayTargetName)，\(bubbles.map(\.text).joined(separator: "、"))")
             .help("右键打开形态和指数菜单，左键触发台词连击")
-            .onChange(of: model.activePet) { _ in
-                burstStartedAt = nil
-            }
         }
         .frame(
             width: FloatingLayout.size(for: model.petScalePercent).width,
@@ -167,12 +163,7 @@ struct ControllerView: View {
         .contentShape(Rectangle())
         .onTapGesture {
             model.playClickAudio(for: model.activePet)
-            let now = Date()
-            if let burstStartedAt,
-               now.timeIntervalSince(burstStartedAt) < SpeechPlanner.burstDuration {
-                return
-            }
-            burstStartedAt = now
+            model.triggerSpeechBurst()
         }
     }
 
@@ -272,7 +263,7 @@ struct ControllerView: View {
 
     private var quoteBadge: some View {
         HStack(spacing: 6) {
-            Text(model.target.name)
+            Text(model.displayTargetName)
                 .foregroundStyle(.primary.opacity(0.82))
             if let quote = model.quote, quote.lastPrice.isFinite, quote.percent.isFinite {
                 Text(String(format: "%.2f", quote.lastPrice))

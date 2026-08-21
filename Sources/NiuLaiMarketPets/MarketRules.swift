@@ -40,6 +40,22 @@ public enum MarketRules {
     }
 }
 
+public enum MarketSoundEvent: Sendable, Equatable {
+    case click
+    case manualSelection
+    case automaticShapeSwitch
+    case targetRotation
+}
+
+/// Keeps the sound side effects aligned across user actions and quote events.
+/// Rotation itself is deliberately silent; mute is an absolute off switch.
+public enum MarketSoundPolicy {
+    public static func shouldPlay(event: MarketSoundEvent, isMuted: Bool) -> Bool {
+        guard !isMuted else { return false }
+        return event != .targetRotation
+    }
+}
+
 public struct MarketStateEngine: Sendable {
     public private(set) var activePet: PetID
     public private(set) var candidatePet: PetID?

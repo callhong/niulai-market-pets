@@ -18,9 +18,12 @@ public final class ControllerModel: ObservableObject {
     @Published public private(set) var petScalePercent: Double = PetScaleRange.defaultPercent
     @Published public private(set) var speechTextScalePercent: Double = SpeechTextScaleRange.defaultPercent
     @Published public private(set) var isIndexPollingEnabled = false
+    @Published public private(set) var isWatchlistPollingEnabled = false
+    @Published public private(set) var watchlistCodes: [String] = []
     @Published public private(set) var isMuted = false
     @Published public private(set) var showMarketPill = true
     @Published public private(set) var marketSnapshots: [String: MarketSnapshot] = [:]
+    @Published public private(set) var speechBurstStartedAt: Date?
 
     public let stateStore: StateStore
     private var quoteService: QuoteService
@@ -34,6 +37,14 @@ public final class ControllerModel: ObservableObject {
     private var suppressEffectsForTargetChange = false
 
     public static let indexPollingInterval: TimeInterval = 60
+
+    public var customTargets: [MarketTarget] {
+        watchlistCodes.compactMap { MarketTarget.tonghuashun(code: $0) }
+    }
+
+    public var displayTargetName: String {
+        quote?.name ?? target.name
+    }
 
     public init(
         quoteService: QuoteService = QuoteService(target: .default),
@@ -59,6 +70,10 @@ public final class ControllerModel: ObservableObject {
         quoteService = QuoteService(target: target)
         mode = state.mode
         activePet = state.activePetID
+        watchlistCodes = state.watchlistCodes
+        if target.isCustomCode && !watchlistCodes.contains(target.symbol) {
+            watchlistCodes.append(target.symbol)
+        }
         // A persisted percent is shown through state/diagnostics until a fresh Quote arrives;
         // never fabricate a price pair that could be mistaken for live data.
         quote = nil
@@ -68,8 +83,10 @@ public final class ControllerModel: ObservableObject {
         petScalePercent = state.petScalePercent
         speechTextScalePercent = state.speechTextScalePercent
         isIndexPollingEnabled = state.indexPollingEnabled
+        isWatchlistPollingEnabled = !isIndexPollingEnabled && state.watchlistPollingEnabled && !customTargets.isEmpty
         isMuted = state.isMuted
         showMarketPill = state.showMarketPill
+        speechBurstStartedAt = nil
         marketSnapshots = [:]
         notificationPolicy.reset()
         isFirstValidQuote = true
@@ -101,6 +118,7 @@ public final class ControllerModel: ObservableObject {
         activePet = pet
         lastError = nil
         notificationPolicy.reset()
+        triggerSpeechBurst()
         playClickAudio(for: pet)
         saveState()
     }
@@ -110,9 +128,11 @@ public final class ControllerModel: ObservableObject {
     }
 
     private func selectTarget(_ newTarget: MarketTarget, disablesPolling: Bool) {
-        if disablesPolling, isIndexPollingEnabled {
+        if disablesPolling {
             setIndexPollingEnabled(false)
+            setWatchlistPollingEnabled(false)
         }
+        addToWatchlistIfNeeded(newTarget)
         guard newTarget != target else { return }
         target = newTarget
         quoteService = QuoteService(target: newTarget)
@@ -138,6 +158,7 @@ public final class ControllerModel: ObservableObject {
         // still obeys the trading-session gate in refresh().
         if let quote, !currentQuoteIsStale, let next = MarketRules.bucket(for: quote.percent), next != activePet {
             activePet = next
+            triggerSpeechBurst()
             playClickAudio(for: next)
         }
         saveState()
@@ -171,6 +192,7 @@ public final class ControllerModel: ObservableObject {
     public func setIndexPollingEnabled(_ enabled: Bool) {
         isIndexPollingEnabled = enabled
         if enabled {
+            isWatchlistPollingEnabled = false
             startIndexPollingTaskIfNeeded()
         } else {
             indexPollingTask?.cancel()
@@ -181,6 +203,22 @@ public final class ControllerModel: ObservableObject {
 
     public func toggleIndexPolling() {
         setIndexPollingEnabled(!isIndexPollingEnabled)
+    }
+
+    public func setWatchlistPollingEnabled(_ enabled: Bool) {
+        isWatchlistPollingEnabled = enabled && !customTargets.isEmpty
+        if isWatchlistPollingEnabled {
+            isIndexPollingEnabled = false
+            startIndexPollingTaskIfNeeded()
+        } else if !isIndexPollingEnabled {
+            indexPollingTask?.cancel()
+            indexPollingTask = nil
+        }
+        saveState()
+    }
+
+    public func toggleWatchlistPolling() {
+        setWatchlistPollingEnabled(!isWatchlistPollingEnabled)
     }
 
     public func setMuted(_ muted: Bool) {
@@ -201,6 +239,26 @@ public final class ControllerModel: ObservableObject {
         setShowMarketPill(!showMarketPill)
     }
 
+    @discardableResult
+    public func addWatchlistCode(_ code: String) -> MarketTarget? {
+        guard let newTarget = MarketTarget.tonghuashun(code: code.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            return nil
+        }
+        addToWatchlistIfNeeded(newTarget)
+        selectTarget(newTarget)
+        return newTarget
+    }
+
+    public func removeWatchlistCode(_ code: String) {
+        watchlistCodes.removeAll { $0 == code }
+        if watchlistCodes.isEmpty { isWatchlistPollingEnabled = false }
+        if target.symbol == code {
+            selectTarget(.default)
+        } else {
+            saveState()
+        }
+    }
+
     public var currentQuoteIsStale: Bool {
         marketSnapshots[target.id]?.isStale(at: Date()) ?? quote?.isStale ?? true
     }
@@ -209,9 +267,17 @@ public final class ControllerModel: ObservableObject {
         marketSnapshots[target.id] ?? MarketSnapshot(targetID: target.id)
     }
 
+    public func displayName(for target: MarketTarget) -> String {
+        snapshot(for: target).quote?.name ?? (target.id == self.target.id ? displayTargetName : target.name)
+    }
+
     public func playClickAudio(for pet: PetID? = nil) {
-        guard !isMuted else { return }
+        guard MarketSoundPolicy.shouldPlay(event: .click, isMuted: isMuted) else { return }
         clickAudioPlayer.play(for: pet ?? activePet)
+    }
+
+    public func triggerSpeechBurst() {
+        speechBurstStartedAt = Date()
     }
 
     public func refresh() async {
@@ -226,7 +292,7 @@ public final class ControllerModel: ObservableObject {
     /// a menu opens. Menu construction remains synchronous and uses the cached
     /// values while these requests are in flight.
     public func refreshSnapshotsForMenu(at date: Date = Date()) async {
-        var catalog = MarketTarget.all
+        var catalog = MarketTarget.all + [MarketTarget.microCap] + customTargets
         if !catalog.contains(where: { $0.id == target.id }) {
             catalog.append(target)
         }
@@ -269,15 +335,18 @@ public final class ControllerModel: ObservableObject {
         currentPercent: Double,
         isInitialSample: Bool,
         isTargetRotation: Bool,
-        isStale: Bool
+        isStale: Bool,
+        allowsNotification: Bool
     ) {
         guard pet != activePet else { return }
         activePet = pet
         lastError = nil
-        if !isTargetRotation {
+        let soundEvent: MarketSoundEvent = isTargetRotation ? .targetRotation : .automaticShapeSwitch
+        if MarketSoundPolicy.shouldPlay(event: soundEvent, isMuted: isMuted) {
+            triggerSpeechBurst()
             playClickAudio(for: pet)
         }
-        if notificationPolicy.shouldNotify(
+        if allowsNotification && notificationPolicy.shouldNotify(
             previousPercent: previousPercent,
             currentPercent: currentPercent,
             switchedTo: pet,
@@ -305,6 +374,8 @@ public final class ControllerModel: ObservableObject {
             petScalePercent: petScalePercent,
             speechTextScalePercent: speechTextScalePercent,
             indexPollingEnabled: isIndexPollingEnabled,
+            watchlistCodes: watchlistCodes,
+            watchlistPollingEnabled: isWatchlistPollingEnabled,
             isMuted: isMuted,
             showMarketPill: showMarketPill
         )
@@ -313,19 +384,27 @@ public final class ControllerModel: ObservableObject {
 
     private func startIndexPollingTaskIfNeeded() {
         indexPollingTask?.cancel()
-        guard isStarted, isIndexPollingEnabled else { return }
+        guard isStarted, isIndexPollingEnabled || isWatchlistPollingEnabled else { return }
         indexPollingTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            while !Task.isCancelled && self.isIndexPollingEnabled {
+            while !Task.isCancelled && (self.isIndexPollingEnabled || self.isWatchlistPollingEnabled) {
                 try? await Task.sleep(nanoseconds: UInt64(Self.indexPollingInterval * 1_000_000_000))
-                guard !Task.isCancelled, self.isIndexPollingEnabled else { return }
+                guard !Task.isCancelled, self.isIndexPollingEnabled || self.isWatchlistPollingEnabled else { return }
                 self.advancePolledTarget()
             }
         }
     }
 
     private func advancePolledTarget() {
-        selectTarget(MarketTarget.nextPollingTarget(after: target.id), disablesPolling: false)
+        if isIndexPollingEnabled {
+            selectTarget(MarketTarget.nextPollingTarget(after: target.id), disablesPolling: false)
+            return
+        }
+        guard isWatchlistPollingEnabled, !customTargets.isEmpty else { return }
+        let targets = customTargets
+        let currentIndex = targets.firstIndex(where: { $0.id == target.id }) ?? -1
+        let next = targets[(currentIndex + 1) % targets.count]
+        selectTarget(next, disablesPolling: false)
     }
 
     private func sendNotification(for pet: PetID, quote: Quote?) {
@@ -344,7 +423,7 @@ public final class ControllerModel: ObservableObject {
     ) {
         let errorText = result.errors.isEmpty ? nil : result.errors.joined(separator: " | ")
         let validQuote = result.quote.flatMap { quote in
-            quote.symbol == target.symbol && quote.name == target.name ? quote : nil
+            quote.symbol == target.symbol && quote.isUsable ? quote : nil
         }
         var snapshot = marketSnapshots[target.id] ?? MarketSnapshot(targetID: target.id)
         if let validQuote {
@@ -367,7 +446,7 @@ public final class ControllerModel: ObservableObject {
             lastError = snapshot.lastError
             let sessionNow = MarketRules.session(for: date)
             session = stale ? .stale : sessionNow
-            if mode == .auto, sessionNow.allowsAutomaticSwitch, !stale,
+            if mode == .auto, !stale,
                let next = engine.accept(percent: validQuote.percent, at: date, tradingAllowed: true, isStale: false) {
                 applySwitch(
                     next,
@@ -375,9 +454,11 @@ public final class ControllerModel: ObservableObject {
                     currentPercent: validQuote.percent,
                     isInitialSample: isFirstValidQuote,
                     isTargetRotation: isTargetRotation,
-                    isStale: stale
+                    isStale: stale,
+                    allowsNotification: sessionNow == .trading
                 )
             }
+            if stale { engine.clearPendingCandidate() }
             isFirstValidQuote = false
         } else {
             isOnline = false
@@ -386,5 +467,11 @@ public final class ControllerModel: ObservableObject {
             engine.clearPendingCandidate()
         }
         saveState()
+    }
+
+    private func addToWatchlistIfNeeded(_ target: MarketTarget) {
+        guard target.isCustomCode, !watchlistCodes.contains(target.symbol) else { return }
+        watchlistCodes.append(target.symbol)
+        if watchlistCodes.count > 100 { watchlistCodes = Array(watchlistCodes.prefix(100)) }
     }
 }

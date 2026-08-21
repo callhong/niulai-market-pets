@@ -17,7 +17,8 @@ public struct NotificationPolicy: Sendable {
     }
 
     public static func body(for pet: PetID, target: MarketTarget, quote: Quote?) -> String {
-        "\(pet.displayName) · \(target.name) · \(MarketRules.price(quote?.lastPrice)) · \(MarketRules.signedPercent(quote?.percent))"
+        let displayName = quote?.name ?? target.name
+        return "\(pet.displayName) · \(displayName) · \(MarketRules.price(quote?.lastPrice)) · \(MarketRules.signedPercent(quote?.percent))"
     }
 
     public mutating func reset() {

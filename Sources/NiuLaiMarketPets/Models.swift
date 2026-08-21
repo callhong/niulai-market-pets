@@ -170,11 +170,32 @@ public struct MarketTarget: Codable, Equatable, Sendable {
         return `default`
     }
 
+    public var isCustomCode: Bool { id.hasPrefix("ths-code-") }
+
     public static func tonghuashun(code: String) -> MarketTarget? {
         guard code.utf8.count == 6,
               code.utf8.allSatisfy({ $0 >= 48 && $0 <= 57 }) else { return nil }
-        let name = code == "883418" ? "微盘股（883418）" : "同花顺（\(code)）"
+        if code == "883418" {
+            return microCapTarget(code: code, name: "微盘股（883418）")
+        }
+        if code == "883421" {
+            return microCapTarget(code: code, name: "同花顺全A（沪深）")
+        }
+        let isShanghai = code.first == "5" || code.first == "6"
+        let eastmoneyMarket = isShanghai ? "1" : "0"
+        let tencentPrefix = isShanghai ? "sh" : ((code.first == "4" || code.first == "8") ? "bj" : "sz")
         return MarketTarget(
+            id: "ths-code-\(code)",
+            symbol: code,
+            name: "代码（\(code)）",
+            eastmoneySecID: "\(eastmoneyMarket).\(code)",
+            tencentSymbol: "\(tencentPrefix)\(code)",
+            sourceKind: .standardIndex
+        )
+    }
+
+    private static func microCapTarget(code: String, name: String) -> MarketTarget {
+        MarketTarget(
             id: "ths-code-\(code)",
             symbol: code,
             name: name,
@@ -199,6 +220,10 @@ public struct Quote: Codable, Equatable, Sendable {
     public let quoteTimestamp: Date
     public let provider: String
     public let isStale: Bool
+
+    public var isUsable: Bool {
+        previousClose > 0 && lastPrice.isFinite && previousClose.isFinite && percent.isFinite
+    }
 
     public init(
         symbol: String = "000001",
@@ -269,6 +294,8 @@ public struct PersistedState: Codable, Equatable, Sendable {
     public var petScalePercent: Double
     public var speechTextScalePercent: Double
     public var indexPollingEnabled: Bool
+    public var watchlistCodes: [String]
+    public var watchlistPollingEnabled: Bool
     public var isMuted: Bool
     public var showMarketPill: Bool
 
@@ -287,6 +314,8 @@ public struct PersistedState: Codable, Equatable, Sendable {
         petScalePercent: Double = PetScaleRange.defaultPercent,
         speechTextScalePercent: Double = SpeechTextScaleRange.defaultPercent,
         indexPollingEnabled: Bool = false,
+        watchlistCodes: [String] = [],
+        watchlistPollingEnabled: Bool = false,
         isMuted: Bool = false,
         showMarketPill: Bool = true
     ) {
@@ -304,6 +333,8 @@ public struct PersistedState: Codable, Equatable, Sendable {
         self.petScalePercent = PetScaleRange.clamped(petScalePercent)
         self.speechTextScalePercent = SpeechTextScaleRange.clamped(speechTextScalePercent)
         self.indexPollingEnabled = indexPollingEnabled
+        self.watchlistCodes = Self.normalizedWatchlistCodes(watchlistCodes)
+        self.watchlistPollingEnabled = watchlistPollingEnabled && !self.watchlistCodes.isEmpty
         self.isMuted = isMuted
         self.showMarketPill = showMarketPill
     }
@@ -311,7 +342,7 @@ public struct PersistedState: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, targetID, mode, manualPetID, activePetID, lastMarketPercent, lastQuoteAt, lastProvider
         case panelVisible, panelX, panelY, petScalePercent, speechTextScalePercent, indexPollingEnabled
-        case isMuted, showMarketPill
+        case watchlistCodes, watchlistPollingEnabled, isMuted, showMarketPill
         case legacyPetScale = "petScale"
     }
 
@@ -343,6 +374,8 @@ public struct PersistedState: Codable, Equatable, Sendable {
             try values.decodeIfPresent(Double.self, forKey: .speechTextScalePercent) ?? SpeechTextScaleRange.defaultPercent
         )
         indexPollingEnabled = try values.decodeIfPresent(Bool.self, forKey: .indexPollingEnabled) ?? false
+        watchlistCodes = Self.normalizedWatchlistCodes(try values.decodeIfPresent([String].self, forKey: .watchlistCodes) ?? [])
+        watchlistPollingEnabled = (try values.decodeIfPresent(Bool.self, forKey: .watchlistPollingEnabled) ?? false) && !watchlistCodes.isEmpty
         isMuted = try values.decodeIfPresent(Bool.self, forKey: .isMuted) ?? false
         showMarketPill = try values.decodeIfPresent(Bool.self, forKey: .showMarketPill) ?? true
     }
@@ -363,8 +396,19 @@ public struct PersistedState: Codable, Equatable, Sendable {
         try values.encode(petScalePercent, forKey: .petScalePercent)
         try values.encode(speechTextScalePercent, forKey: .speechTextScalePercent)
         try values.encode(indexPollingEnabled, forKey: .indexPollingEnabled)
+        try values.encode(watchlistCodes, forKey: .watchlistCodes)
+        try values.encode(watchlistPollingEnabled, forKey: .watchlistPollingEnabled)
         try values.encode(isMuted, forKey: .isMuted)
         try values.encode(showMarketPill, forKey: .showMarketPill)
+    }
+
+    private static func normalizedWatchlistCodes(_ codes: [String]) -> [String] {
+        codes
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { $0.utf8.count == 6 && $0.utf8.allSatisfy { $0 >= 48 && $0 <= 57 } }
+            .reduce(into: []) { result, code in
+                if !result.contains(code) && result.count < 100 { result.append(code) }
+            }
     }
 }
 

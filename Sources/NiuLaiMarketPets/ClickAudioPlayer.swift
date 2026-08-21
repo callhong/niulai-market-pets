@@ -22,6 +22,9 @@ public enum ClickAudioCatalog {
 
 @MainActor
 public final class ClickAudioPlayer {
+    /// All four cues use the same application-level gain. The WAV files are
+    /// intentionally played at the same AVAudioPlayer volume on macOS.
+    public static let normalizedVolume: Float = 1.0
     private let bundle: Bundle
     private var player: AVAudioPlayer?
 
@@ -40,6 +43,7 @@ public final class ClickAudioPlayer {
 
         do {
             player = try AVAudioPlayer(contentsOf: url)
+            player?.volume = Self.normalizedVolume
             player?.prepareToPlay()
             player?.play()
         } catch {
