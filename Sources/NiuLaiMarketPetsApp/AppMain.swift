@@ -424,7 +424,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         targetItem.submenu = makeTargetSubmenu()
         menu.addItem(targetItem)
 
-        let pill = NSMenuItem(title: "显示行情药丸", action: #selector(toggleMarketPillFromMenu(_:)), keyEquivalent: "")
+        let pill = NSMenuItem(title: "显示行情标签", action: #selector(toggleMarketPillFromMenu(_:)), keyEquivalent: "")
         pill.target = self
         pill.state = model.showMarketPill ? .on : .off
         menu.addItem(pill)
@@ -607,7 +607,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         statusPollingItem = targetItem.submenu?.items.first(where: { $0.action == #selector(toggleIndexPollingFromMenu(_:)) })
         menu.addItem(targetItem)
 
-        let pillItem = NSMenuItem(title: "显示行情药丸", action: #selector(toggleMarketPillFromMenu(_:)), keyEquivalent: "")
+        let pillItem = NSMenuItem(title: "显示行情标签", action: #selector(toggleMarketPillFromMenu(_:)), keyEquivalent: "")
         pillItem.target = self
         menu.addItem(pillItem)
         statusPillItem = pillItem

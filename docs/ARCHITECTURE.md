@@ -39,7 +39,7 @@ Windows WPF/.NET 8 是独立可执行程序。它在 `platforms/windows/Core` �
 
 行情源和桌面 UI 通过核心模型隔离。`QuoteService` 只负责按同一目标取数和主备降级，并把服务端真实名称写入 `Quote`；`MarketSnapshot` 按目标保存最后有效值并允许菜单异步刷新；`MarketStateEngine` 只负责百分比映射、防抖和冷却；`NotificationPolicy` 只允许真正跨越 0 或 1 的自动切换通知；`MarketSoundPolicy` 统一点击、手动切换、自动切换、轮换和静音规则；`ControllerModel` 负责固定指数、自选池、轮询、用户操作和持久化；macOS 层负责悬浮窗、状态栏、两级菜单和通知。
 
-macOS 的六个固定指数不进入自选池轮询；输入的六位股票/ETF 代码进入本地自选池，`883418` 作为内置微盘股目标保留。选择具体目标会关闭两种轮询，开启一种轮询会关闭另一种。行情药丸只由 `showMarketPill` 控制，不影响行情刷新、形态、声音或通知。
+macOS 的六个固定指数不进入自选池轮询；输入的六位股票/ETF 代码进入本地自选池，`883418` 作为内置微盘股目标保留。选择具体目标会关闭两种轮询，开启一种轮询会关闭另一种。行情标签只由 `showMarketPill` 控制，不影响行情刷新、形态、声音或通知。
 
 宠物资源由 manifest 加 `spritesheet.webp` 组成，构建时复制到应用包的 `Contents/Resources/Pets/<pet-id>`。运行时只从应用包读取资源，用户状态保存在 `~/Library/Application Support/NiuLaiMarketPets`，不依赖外部配置或外置宠物目录；Windows 从发布目录读取相同三套 WebP/WAV，状态保存在 `%APPDATA%\\NiuLaiMarketPets\\config.json`。
 
