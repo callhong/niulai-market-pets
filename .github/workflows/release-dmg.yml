@@ -27,3 +27,69 @@ jobs:
         run: |
           gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1 || gh release create "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --generate-notes
           gh release upload "${GITHUB_REF_NAME}" dist/*.dmg --repo "${GITHUB_REPOSITORY}" --clobber
+
+  windows:
+    needs: release
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Test Windows core
+        run: dotnet test platforms/windows/NiuLaiMarketPets.Windows.Tests/NiuLaiMarketPets.Windows.Tests.csproj -c Release
+
+      - name: Publish self-contained win-x64
+        working-directory: platforms/windows
+        run: dotnet publish -c Release -r win-x64 --self-contained true
+
+      - name: Build Windows installer
+        run: |
+          $paths = @(
+            (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 6\ISCC.exe"),
+            (Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"),
+            (Join-Path $env:ProgramFiles "Inno Setup 6\ISCC.exe")
+          ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
+          if (-not $paths) {
+            winget install --id JRSoftware.InnoSetup --exact --silent --accept-source-agreements --accept-package-agreements
+          }
+          $iscc = @(
+            (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 6\ISCC.exe"),
+            (Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"),
+            (Join-Path $env:ProgramFiles "Inno Setup 6\ISCC.exe")
+          ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
+          if (-not $iscc) { throw "Inno Setup compiler (ISCC.exe) was not found." }
+          & $iscc /Qp "platforms/windows/installer/NiuLaiMarketPets.iss"
+
+      - name: Package ZIP and SHA256
+        run: |
+          $publish = "platforms/windows/bin/Release/net8.0-windows10.0.22621.0/win-x64/publish"
+          $dist = "platforms/windows/dist"
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+          $zip = Join-Path $dist "NiuLaiMarketPets-windows-x64.zip"
+          if (Test-Path $zip) { Remove-Item $zip -Force }
+          Compress-Archive -Path "$publish/*" -DestinationPath $zip
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  NiuLaiMarketPets-windows-x64.zip" | Set-Content (Join-Path $dist "NiuLaiMarketPets-windows-x64.zip.sha256")
+
+      - name: Hash Windows installer
+        run: |
+          $dist = "platforms/windows/dist"
+          $setup = Join-Path $dist "NiuLaiMarketPets-windows-x64-setup.exe"
+          if (-not (Test-Path -LiteralPath $setup)) { throw "Installer was not produced." }
+          $hash = (Get-FileHash $setup -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  NiuLaiMarketPets-windows-x64-setup.exe" | Set-Content (Join-Path $dist "NiuLaiMarketPets-windows-x64-setup.exe.sha256")
+
+      - name: Upload Windows assets to Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $assets = Get-ChildItem -Path platforms/windows/dist -File
+          gh release upload $env:GITHUB_REF_NAME $assets.FullName --repo $env:GITHUB_REPOSITORY --clobber
