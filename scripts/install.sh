@@ -33,6 +33,26 @@ had_plist=false
 if $had_app; then ditto "$app_destination" "$backup_root/app-before-install"; fi
 if $had_plist; then cp -p "$plist_destination" "$backup_root/launchagent-before-install.plist"; fi
 
+# Stop both the installed controller and a manually opened DMG copy before
+# replacing the bundle. Older builds did not have the single-instance lock;
+# matching the exact product executable keeps upgrades deterministic without
+# touching unrelated processes.
+launchctl bootout "gui/$uid/$label" 2>/dev/null || true
+for attempt in {1..20}; do
+  found_running=false
+  while read -r process_id process_command; do
+    case "$process_command" in
+      */NiuLaiMarketPets.app/Contents/MacOS/NiuLaiMarketPets)
+        [[ "$process_id" == "$$" ]] && continue
+        kill "$process_id" 2>/dev/null || true
+        found_running=true
+        ;;
+    esac
+  done < <(ps -axo pid=,command=)
+  $found_running || break
+  sleep 0.1
+done
+
 # Migrate any older controller for this product family so a direct install
 # cannot leave two floating pets running at the same time.
 for legacy_plist in "$user_home/Library/LaunchAgents/"*niulai-market-pets*.plist(N); do
@@ -73,7 +93,6 @@ jq -n \
   '{schemaVersion:2, installedAt:$installedAt, appPath:$appPath, plistPath:$plistPath, backupRoot:$backupRoot, hadApp:$hadApp, hadPlist:$hadPlist}' \
   > "$state_root/install-state.json"
 
-launchctl bootout "gui/$uid/$label" 2>/dev/null || true
 bootstrap_ok=false
 for attempt in 1 2 3; do
   if launchctl bootstrap "gui/$uid" "$plist_destination"; then

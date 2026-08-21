@@ -6,5 +6,5 @@ NIULAI_SKIP_BUILD=1 \
 NIULAI_APP_SOURCE="$script_dir/NiuLaiMarketPets.app" \
   "$script_dir/scripts/install.sh"
 
-print "安装完成。控制器已启动；按回车关闭此窗口。"
+print "安装完成：旧版已按回滚策略覆盖升级，控制器已启动。按回车关闭此窗口。"
 read

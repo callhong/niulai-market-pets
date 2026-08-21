@@ -94,7 +94,9 @@ public struct TencentQuoteProvider: QuoteProviding {
 
 /// Public Tonghuashun index page provider used for the selected six-digit
 /// target, including the built-in 883418 micro-cap indicator. It accepts both
-/// UTF-8 and GB18030/GBK responses so the returned Chinese name remains real.
+/// UTF-8 and GB18030/GBK responses. The stable target catalog supplies the
+/// display name, matching Windows and avoiding HTML title markup leaking into
+/// the UI.
 public struct TonghuashunPublicQuoteProvider: QuoteProviding {
     public let name = "tonghuashun-public"
     public let target: MarketTarget
@@ -126,10 +128,9 @@ public struct TonghuashunPublicQuoteProvider: QuoteProviding {
             last > 0,
             previous > 0
         else { throw ProviderError.invalidPayload }
-        let displayName = TonghuashunHTMLParser.name(in: html) ?? target.name
         return Quote(
             symbol: target.symbol,
-            name: displayName,
+            name: target.name,
             lastPrice: last,
             previousClose: previous,
             quoteTimestamp: Date(),
@@ -241,7 +242,13 @@ enum TonghuashunHTMLParser {
               let end = html.range(of: "</h3>", range: open.upperBound..<html.endIndex)
         else { return nil }
         let value = String(html[open.upperBound..<end.lowerBound])
+            .replacingOccurrences(of: "<span[^>]*>.*?</span>", with: "", options: [.regularExpression, .caseInsensitive])
+            .replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
             .replacingOccurrences(of: "&nbsp;", with: " ")
+            .replacingOccurrences(of: "&amp;", with: "&")
+            .replacingOccurrences(of: "&lt;", with: "<")
+            .replacingOccurrences(of: "&gt;", with: ">")
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return value.isEmpty ? nil : value
     }

@@ -81,6 +81,30 @@ struct MarketTestRunner {
             expect(TonghuashunHTMLParser.lastPrice(in: fixture) == 1354.42)
             expect(TonghuashunHTMLParser.previousClose(in: fixture) == 1347.05)
             expect(Quote.percent(lastPrice: 1354.42, previousClose: 1347.05) > 0.54)
+            let namedFixture = "<h3>同花顺全A（沪深）<span>883421</span></h3>"
+            expect(TonghuashunHTMLParser.name(in: namedFixture) == "同花顺全A（沪深）")
+        }
+        await runAsync("macOS update metadata and version comparison") {
+            let payload = """
+            {
+              "tag_name": "v1.2.0",
+              "html_url": "https://github.com/callhong/niulai-market-pets/releases/tag/v1.2.0",
+              "assets": [
+                {"name":"NiuLaiMarketPets-1.2.0.dmg","browser_download_url":"https://github.com/callhong/niulai-market-pets/releases/download/v1.2.0/NiuLaiMarketPets-1.2.0.dmg"}
+              ]
+            }
+            """
+            let service = MacUpdateService(currentVersion: "1.1.0") { Data(payload.utf8) }
+            let result = await service.check()
+            expect(result.success)
+            expect(result.isNewer)
+            expect(result.latestVersion == "1.2.0")
+            expect(result.release?.diskImageURL?.absoluteString.contains("1.2.0.dmg") == true)
+
+            let current = MacUpdateService(currentVersion: "1.2.0") { Data(payload.utf8) }
+            let currentResult = await current.check()
+            expect(currentResult.success)
+            expect(!currentResult.isNewer)
         }
         run("speech cadence and click burst") {
             let start = Date(timeIntervalSinceReferenceDate: 105)
@@ -274,6 +298,11 @@ struct MarketTestRunner {
 
     static func run(_ name: String, _ body: () -> Void) {
         body()
+        print("PASS: \(name)")
+    }
+
+    static func runAsync(_ name: String, _ body: () async -> Void) async {
+        await body()
         print("PASS: \(name)")
     }
 

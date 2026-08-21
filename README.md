@@ -63,11 +63,15 @@ Windows 安装包没有商业 Authenticode 签名。首次下载请先用 Releas
 - 一级菜单可独立勾选“显示行情药丸”，关闭后只隐藏宠物下方的指数、点数和涨跌幅胶囊。
 - 宠物大小和台词字号都使用百分比滑块调节。
 - 顶部状态栏与右键菜单保持一致的两级入口：形态、指数。
+- 两级菜单均提供“检查更新…”，只在用户确认后打开官方 macOS DMG；不会后台静默替换应用。
+- macOS 与 Windows 都限制为单实例，避免从 DMG 直接打开时出现两只宠物。
 - 登录启动、状态持久化、行情故障降级和可回滚安装。
 
 ## 直接安装
 
 从 [Releases](https://github.com/callhong/niulai-market-pets/releases) 下载最新 DMG，打开后双击 Install NiuLai Market Pets.command。安装器会将独立应用放入当前用户的 Applications 目录，并安装用户级 LaunchAgent。
+
+已经安装旧版时直接运行新 DMG 内的安装命令即可升级，不需要先卸载。安装器会先停止当前用户 LaunchAgent，将旧 App 和 LaunchAgent 复制到安装回滚目录，再覆盖安装并重新启动；因此通过“检查更新…”打开 DMG 后也是同一条升级路径。只有需要恢复安装前状态时才使用 DMG 内的卸载脚本。
 
 当前源码构建的 DMG 为 `dist/NiuLaiMarketPets-1.1.0.dmg`；在统一 Release 创建前，请使用本地构建产物或 Actions artifact。
 
@@ -76,6 +80,7 @@ Windows 安装包没有商业 Authenticode 签名。首次下载请先用 Releas
 - 将宠物资源和 WAV 音效内置在应用包中，不再写入外置宠物目录；
 - 将运行状态、日志和安装回滚备份保存到 ~/Library/Application Support/NiuLaiMarketPets；
 - 发现旧的同产品 LaunchAgent 时先停用并备份，避免两个悬浮控制器同时运行；
+- 覆盖前结束已安装 App 和手动打开的 DMG 同产品进程，避免旧版残留造成两只宠物；
 - 安装失败时保留备份，卸载时恢复安装前的应用与 LaunchAgent。
 
 首次打开如果 macOS 提示来自未验证开发者，请在系统设置的隐私与安全性中允许打开。公开 Release 默认使用本地临时签名，未配置 Apple Developer 公证。

@@ -94,6 +94,10 @@ private extension NSColor {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDelegate {
     let model = ControllerModel()
+    private let updateService = MacUpdateService(
+        currentVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.1.0"
+    )
+    private var singleInstanceLock: SingleInstanceLock?
     private var panel: FloatingPanel?
     private var contextHostingView: ContextHostingView?
     private var statusItem: NSStatusItem?
@@ -108,9 +112,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var statusPillItem: NSMenuItem?
     private var scalePopover: NSPopover?
     private var speechScalePopover: NSPopover?
+    private var updateTask: Task<Void, Never>?
     private var cancellables = Set<AnyCancellable>()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        guard acquireSingleInstance() else { return }
         NSApplication.shared.setActivationPolicy(.accessory)
         model.start()
         observeLayoutChanges()
@@ -120,7 +126,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        updateTask?.cancel()
         model.stop()
+    }
+
+    private func acquireSingleInstance() -> Bool {
+        guard let lock = SingleInstanceLock() else {
+            let bundleID = Bundle.main.bundleIdentifier ?? "com.callhong.niulai-market-pets"
+            let currentPID = ProcessInfo.processInfo.processIdentifier
+            if let existing = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+                .first(where: { $0.processIdentifier != currentPID }) {
+                existing.activate(options: [.activateIgnoringOtherApps, .activateAllWindows])
+            }
+            NSApplication.shared.terminate(nil)
+            return false
+        }
+        singleInstanceLock = lock
+        return true
     }
 
     func showPanel() {
@@ -234,6 +256,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         model.toggleMarketPill()
         sender.state = model.showMarketPill ? .on : .off
         statusPillItem?.state = model.showMarketPill ? .on : .off
+    }
+
+    @objc private func checkForUpdatesFromMenu() {
+        guard updateTask == nil else { return }
+        updateTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.checkForUpdates()
+            self.updateTask = nil
+        }
+    }
+
+    private func checkForUpdates() async {
+        let result = await updateService.check()
+        guard result.success else {
+            showUpdateAlert(title: "检查更新失败", message: result.message)
+            return
+        }
+        guard result.isNewer, let release = result.release else {
+            showUpdateAlert(
+                title: "检查更新",
+                message: "当前已是最新版本（\(result.currentVersion)）。"
+            )
+            return
+        }
+
+        if let diskImageURL = release.diskImageURL {
+            let alert = NSAlert()
+            alert.messageText = "发现 macOS 新版本 \(result.latestVersion)"
+            alert.informativeText = "点击“打开下载”后获取官方 DMG。打开 DMG 内的安装命令即可覆盖旧版本；安装器会先保留回滚备份。"
+            alert.addButton(withTitle: "打开下载")
+            alert.addButton(withTitle: "以后再说")
+            if alert.runModal() == .alertFirstButtonReturn {
+                NSWorkspace.shared.open(diskImageURL)
+            }
+        } else {
+            let alert = NSAlert()
+            alert.messageText = "发现新版本 \(result.latestVersion)"
+            alert.informativeText = "该 Release 暂未提供 macOS DMG，可以打开发布页查看详情。"
+            alert.addButton(withTitle: "打开发布页")
+            alert.addButton(withTitle: "取消")
+            if alert.runModal() == .alertFirstButtonReturn {
+                NSWorkspace.shared.open(release.htmlURL)
+            }
+        }
+    }
+
+    private func showUpdateAlert(title: String, message: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.addButton(withTitle: "确定")
+        _ = alert.runModal()
     }
 
     @objc private func showScaleEditorFromMenu() {
@@ -374,6 +448,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         mute.target = self
         mute.state = model.isMuted ? .on : .off
         menu.addItem(mute)
+        let update = NSMenuItem(title: "检查更新…", action: #selector(checkForUpdatesFromMenu), keyEquivalent: "")
+        update.target = self
+        menu.addItem(update)
         menu.addItem(.separator())
 
         let visibility = NSMenuItem(
@@ -549,6 +626,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         muteItem.target = self
         menu.addItem(muteItem)
         statusMuteItem = muteItem
+
+        let update = NSMenuItem(title: "检查更新…", action: #selector(checkForUpdatesFromMenu), keyEquivalent: "")
+        update.target = self
+        menu.addItem(update)
 
         menu.addItem(.separator())
         let visibility = NSMenuItem(title: "显示／隐藏宠物", action: #selector(togglePanel), keyEquivalent: "")
